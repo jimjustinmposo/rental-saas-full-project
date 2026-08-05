@@ -1,11 +1,14 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import apiClient from "../api/apiClient";
 
 export default function ApartmentsPage() {
+  const navigate = useNavigate();
   const [apartments, setApartments] = useState([]);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ name: "", address: "" });
   const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
 
   const load = () => {
     apiClient.get("/apartments").then((res) => setApartments(res.data)).finally(() => setLoading(false));
@@ -26,6 +29,14 @@ export default function ApartmentsPage() {
     await apiClient.delete(`/apartments/${id}`);
     load();
   };
+
+  const filteredApartments = useMemo(() => {
+    if (!search.trim()) return apartments;
+    const q = search.toLowerCase();
+    return apartments.filter(
+      (a) => a.name?.toLowerCase().includes(q) || a.address?.toLowerCase().includes(q)
+    );
+  }, [apartments, search]);
 
   return (
     <div>
@@ -63,14 +74,30 @@ export default function ApartmentsPage() {
         </form>
       )}
 
+      <div className="search-bar">
+        <span>🔍</span>
+        <input
+          placeholder="Search by name or address…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+      </div>
+
       {loading ? (
         <div className="empty-state">Loading…</div>
-      ) : apartments.length === 0 ? (
-        <div className="card empty-state">No apartments yet. Click "Add Apartment" to create your first property.</div>
+      ) : filteredApartments.length === 0 ? (
+        <div className="card empty-state">
+          {search ? "No apartments match your search." : 'No apartments yet. Click "Add Apartment" to create your first property.'}
+        </div>
       ) : (
         <div className="tenant-cards-grid">
-          {apartments.map((apt) => (
-            <div className="card" key={apt.id}>
+          {filteredApartments.map((apt) => (
+            <div
+              className="card clickable-card"
+              key={apt.id}
+              onClick={() => navigate(`/units?apartment=${encodeURIComponent(apt.name)}`)}
+              title="View units for this apartment"
+            >
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                 <div>
                   <div style={{ fontWeight: 800, fontSize: 16 }}>{apt.name}</div>
@@ -78,7 +105,14 @@ export default function ApartmentsPage() {
                     {apt.address || "No address set"}
                   </div>
                 </div>
-                <button className="btn btn-danger" style={{ padding: "6px 10px" }} onClick={() => handleDelete(apt.id)}>
+                <button
+                  className="btn btn-danger"
+                  style={{ padding: "6px 10px" }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDelete(apt.id);
+                  }}
+                >
                   Delete
                 </button>
               </div>

@@ -22,7 +22,7 @@ export default function MobileNav() {
     <div className="mobile-nav">
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 800, fontSize: 16 }}>
-          🏘️ RentalOS
+          🏘️ FlatOwner Webapp
         </div>
         <button
           aria-label="Toggle menu"

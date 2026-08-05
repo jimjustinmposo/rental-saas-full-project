@@ -1,4 +1,5 @@
 import React from "react";
+import { useNavigate } from "react-router-dom";
 
 const statusPill = (status) => {
   const cls = status === "Paid" ? "pill-success" : status === "Late" ? "pill-warning" : "pill-danger";
@@ -6,6 +7,8 @@ const statusPill = (status) => {
 };
 
 export default function RecentPaymentsTable({ payments }) {
+  const navigate = useNavigate();
+
   return (
     <div className="card">
       <div className="card-title" style={{ marginBottom: 12 }}>
@@ -27,7 +30,12 @@ export default function RecentPaymentsTable({ payments }) {
             </thead>
             <tbody>
               {payments.map((p) => (
-                <tr key={p.id}>
+                <tr
+                  key={p.id}
+                  className="clickable-row"
+                  onClick={() => navigate(`/payments?tenant=${encodeURIComponent(p.tenant_name || "")}`)}
+                  title="View this tenant's full payment history"
+                >
                   <td data-label="Tenant">{p.tenant_name || "—"}</td>
                   <td data-label="Month">{p.month}</td>
                   <td data-label="Amount Paid">${Number(p.amount_paid).toLocaleString()}</td>

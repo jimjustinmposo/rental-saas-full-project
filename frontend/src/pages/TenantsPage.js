@@ -1,7 +1,9 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import apiClient from "../api/apiClient";
 
 export default function TenantsPage() {
+  const navigate = useNavigate();
   const [tenants, setTenants] = useState([]);
   const [units, setUnits] = useState([]);
   const [showForm, setShowForm] = useState(false);
@@ -10,6 +12,7 @@ export default function TenantsPage() {
   const [imagePreview, setImagePreview] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
 
   const load = () => {
     Promise.all([apiClient.get("/tenants"), apiClient.get("/units")]).then(([t, u]) => {
@@ -56,6 +59,18 @@ export default function TenantsPage() {
     await apiClient.delete(`/tenants/${id}`);
     load();
   };
+
+  const filteredTenants = useMemo(() => {
+    if (!search.trim()) return tenants;
+    const q = search.toLowerCase();
+    return tenants.filter(
+      (t) =>
+        t.name?.toLowerCase().includes(q) ||
+        t.phone?.toLowerCase().includes(q) ||
+        t.apartment_name?.toLowerCase().includes(q) ||
+        t.unit_number?.toLowerCase().includes(q)
+    );
+  }, [tenants, search]);
 
   return (
     <div>
@@ -148,14 +163,31 @@ export default function TenantsPage() {
         </form>
       )}
 
+      <div className="search-bar">
+        <span>🔍</span>
+        <input
+          placeholder="Search by name, phone, apartment, or unit…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+      </div>
+
       {loading ? (
         <div className="empty-state">Loading…</div>
-      ) : tenants.length === 0 ? (
-        <div className="card empty-state">No tenants yet. Add your first tenant above.</div>
+      ) : filteredTenants.length === 0 ? (
+        <div className="card empty-state">
+          {search ? "No tenants match your search." : "No tenants yet. Add your first tenant above."}
+        </div>
       ) : (
         <div className="tenant-cards-grid">
-          {tenants.map((t) => (
-            <div className="card" key={t.id} style={{ textAlign: "center" }}>
+          {filteredTenants.map((t) => (
+            <div
+              className="card clickable-card"
+              key={t.id}
+              style={{ textAlign: "center" }}
+              onClick={() => navigate(`/payments?tenant=${encodeURIComponent(t.name)}`)}
+              title="View this tenant's payment history"
+            >
               <div
                 style={{
                   width: 64,
@@ -181,7 +213,10 @@ export default function TenantsPage() {
               <button
                 className="btn btn-danger"
                 style={{ marginTop: 12, padding: "6px 14px" }}
-                onClick={() => handleDelete(t.id)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleDelete(t.id);
+                }}
               >
                 Remove
               </button>

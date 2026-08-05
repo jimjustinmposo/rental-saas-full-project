@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import apiClient from "../api/apiClient";
+import { useSortableData } from "../hooks/useSortableData";
 
 export default function ExpensesPage() {
   const [expenses, setExpenses] = useState([]);
@@ -7,6 +8,7 @@ export default function ExpensesPage() {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ apartment_id: "", category: "", description: "", amount: "", date: "" });
   const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
 
   const load = () => {
     Promise.all([apiClient.get("/expenses"), apiClient.get("/apartments")]).then(([e, a]) => {
@@ -30,6 +32,19 @@ export default function ExpensesPage() {
     await apiClient.delete(`/expenses/${id}`);
     load();
   };
+
+  const filteredExpenses = useMemo(() => {
+    if (!search.trim()) return expenses;
+    const q = search.toLowerCase();
+    return expenses.filter(
+      (e) =>
+        e.category?.toLowerCase().includes(q) ||
+        e.description?.toLowerCase().includes(q) ||
+        e.apartment_name?.toLowerCase().includes(q)
+    );
+  }, [expenses, search]);
+
+  const { sortedItems, requestSort, sortIndicator } = useSortableData(filteredExpenses);
 
   return (
     <div>
@@ -100,25 +115,44 @@ export default function ExpensesPage() {
         </form>
       )}
 
+      <div className="search-bar">
+        <span>🔍</span>
+        <input
+          placeholder="Search by category, description, or apartment…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+      </div>
+
       <div className="card">
         {loading ? (
           <div className="empty-state">Loading…</div>
-        ) : expenses.length === 0 ? (
-          <div className="empty-state">No expenses logged yet.</div>
+        ) : sortedItems.length === 0 ? (
+          <div className="empty-state">
+            {search ? "No expenses match your search." : "No expenses logged yet."}
+          </div>
         ) : (
           <div className="table-wrap">
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>Category</th>
-                  <th>Apartment</th>
-                  <th>Amount</th>
-                  <th>Date</th>
+                  <th className="sortable" onClick={() => requestSort("category")}>
+                    Category{sortIndicator("category")}
+                  </th>
+                  <th className="sortable" onClick={() => requestSort("apartment_name")}>
+                    Apartment{sortIndicator("apartment_name")}
+                  </th>
+                  <th className="sortable" onClick={() => requestSort("amount")}>
+                    Amount{sortIndicator("amount")}
+                  </th>
+                  <th className="sortable" onClick={() => requestSort("date")}>
+                    Date{sortIndicator("date")}
+                  </th>
                   <th></th>
                 </tr>
               </thead>
               <tbody>
-                {expenses.map((e) => (
+                {sortedItems.map((e) => (
                   <tr key={e.id}>
                     <td data-label="Category">{e.category}</td>
                     <td data-label="Apartment">{e.apartment_name || "General"}</td>

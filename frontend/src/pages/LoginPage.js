@@ -42,7 +42,7 @@ export default function LoginPage() {
         <div style={{ textAlign: "center", marginBottom: 24 }}>
           <div style={{ fontSize: 34 }}>🏘️</div>
           <h1 style={{ fontSize: 22, fontWeight: 800, color: "var(--color-primary-dark)", marginTop: 6 }}>
-            RentalOS
+            FlatOwner Webapp
           </h1>
           <p style={{ color: "var(--color-text-muted)", fontSize: 13.5, marginTop: 4 }}>
             Log in to manage your properties

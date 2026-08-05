@@ -1,4 +1,5 @@
 import React from "react";
+import { useNavigate } from "react-router-dom";
 
 const Row = ({ label, value, tone }) => (
   <div
@@ -23,9 +24,14 @@ const Row = ({ label, value, tone }) => (
 );
 
 export default function MonthlyReportSummary({ summary }) {
+  const navigate = useNavigate();
   if (!summary) return null;
   return (
-    <div className="card">
+    <div
+      className="card clickable-card"
+      onClick={() => navigate("/reports")}
+      title="View full reports"
+    >
       <div className="card-title" style={{ marginBottom: 6 }}>
         Monthly Report
       </div>

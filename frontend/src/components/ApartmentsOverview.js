@@ -1,6 +1,9 @@
 import React from "react";
+import { useNavigate } from "react-router-dom";
 
 export default function ApartmentsOverview({ apartments }) {
+  const navigate = useNavigate();
+
   return (
     <div className="card">
       <div className="card-title" style={{ marginBottom: 14 }}>
@@ -14,6 +17,8 @@ export default function ApartmentsOverview({ apartments }) {
           apartments.slice(0, 4).map((apt) => (
             <div
               key={apt.id}
+              onClick={() => navigate(`/units?apartment=${encodeURIComponent(apt.name)}`)}
+              title="View units for this apartment"
               style={{
                 display: "flex",
                 alignItems: "center",
@@ -21,7 +26,11 @@ export default function ApartmentsOverview({ apartments }) {
                 background: "var(--color-primary-light)",
                 borderRadius: 12,
                 padding: "10px 14px",
+                cursor: "pointer",
+                transition: "opacity 0.15s ease",
               }}
+              onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.8")}
+              onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}
             >
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <div

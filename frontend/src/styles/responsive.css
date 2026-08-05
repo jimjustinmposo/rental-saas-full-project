@@ -8,16 +8,23 @@
 /* ---------- Sidebar (desktop default) ---------- */
 .sidebar {
   width: var(--sidebar-width);
-  min-height: 100vh;
+  height: 100vh;
   background: linear-gradient(180deg, var(--color-sidebar-from), var(--color-sidebar-to));
   color: white;
   padding: 20px 14px;
   display: flex;
   flex-direction: column;
   gap: 4px;
-  position: sticky;
+  position: fixed;
   top: 0;
+  left: 0;
   flex-shrink: 0;
+  overflow-y: auto;
+  z-index: 30;
+}
+
+.main-area {
+  margin-left: var(--sidebar-width);
 }
 
 .mobile-nav {
@@ -89,6 +96,7 @@
 
   .main-area {
     padding: 16px 14px 90px;
+    margin-left: 0;
   }
 
   .page-header h1 {

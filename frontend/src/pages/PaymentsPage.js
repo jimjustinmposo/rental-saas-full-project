@@ -1,7 +1,10 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo } from "react";
+import { useSearchParams } from "react-router-dom";
 import apiClient from "../api/apiClient";
+import { useSortableData } from "../hooks/useSortableData";
 
 export default function PaymentsPage() {
+  const [searchParams] = useSearchParams();
   const [payments, setPayments] = useState([]);
   const [tenants, setTenants] = useState([]);
   const [showForm, setShowForm] = useState(false);
@@ -15,6 +18,7 @@ export default function PaymentsPage() {
     payment_date: "",
   });
   const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState(searchParams.get("tenant") || "");
 
   const load = () => {
     Promise.all([apiClient.get("/payments"), apiClient.get("/tenants")]).then(([p, t]) => {
@@ -52,6 +56,27 @@ export default function PaymentsPage() {
     const cls = status === "Paid" ? "pill-success" : status === "Late" ? "pill-warning" : "pill-danger";
     return <span className={`pill ${cls}`}>{status}</span>;
   };
+
+  // Search matches tenant name — so "show all payments for a particular
+  // tenant" is just typing their name here.
+  const filteredPayments = useMemo(() => {
+    if (!search.trim()) return payments;
+    const q = search.toLowerCase();
+    return payments.filter(
+      (p) =>
+        p.tenant_name?.toLowerCase().includes(q) ||
+        p.apartment_name?.toLowerCase().includes(q) ||
+        p.unit_number?.toLowerCase().includes(q) ||
+        p.month?.toLowerCase().includes(q)
+    );
+  }, [payments, search]);
+
+  const { sortedItems, requestSort, sortIndicator } = useSortableData(filteredPayments);
+
+  const tenantTotal = useMemo(() => {
+    if (!search.trim()) return null;
+    return filteredPayments.reduce((sum, p) => sum + Number(p.amount_paid || 0), 0);
+  }, [filteredPayments, search]);
 
   return (
     <div>
@@ -123,27 +148,63 @@ export default function PaymentsPage() {
         </form>
       )}
 
+      <div className="search-bar">
+        <span>🔍</span>
+        <input
+          placeholder="Search by tenant, apartment, unit, or month…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+      </div>
+
+      {tenantTotal !== null && (
+        <div
+          style={{
+            marginBottom: 16,
+            fontSize: 13.5,
+            color: "var(--color-text-muted)",
+          }}
+        >
+          {filteredPayments.length} matching record{filteredPayments.length !== 1 ? "s" : ""} · total paid{" "}
+          <strong style={{ color: "var(--color-text)" }}>${tenantTotal.toLocaleString()}</strong>
+        </div>
+      )}
+
       <div className="card">
         {loading ? (
           <div className="empty-state">Loading…</div>
-        ) : payments.length === 0 ? (
-          <div className="empty-state">No payments recorded yet.</div>
+        ) : sortedItems.length === 0 ? (
+          <div className="empty-state">
+            {search ? "No payments match your search." : "No payments recorded yet."}
+          </div>
         ) : (
           <div className="table-wrap">
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>Tenant</th>
-                  <th>Month</th>
-                  <th>Due</th>
-                  <th>Paid</th>
-                  <th>Balance</th>
-                  <th>Status</th>
+                  <th className="sortable" onClick={() => requestSort("tenant_name")}>
+                    Tenant{sortIndicator("tenant_name")}
+                  </th>
+                  <th className="sortable" onClick={() => requestSort("month")}>
+                    Month{sortIndicator("month")}
+                  </th>
+                  <th className="sortable" onClick={() => requestSort("amount_due")}>
+                    Due{sortIndicator("amount_due")}
+                  </th>
+                  <th className="sortable" onClick={() => requestSort("amount_paid")}>
+                    Paid{sortIndicator("amount_paid")}
+                  </th>
+                  <th className="sortable" onClick={() => requestSort("balance")}>
+                    Balance{sortIndicator("balance")}
+                  </th>
+                  <th className="sortable" onClick={() => requestSort("status")}>
+                    Status{sortIndicator("status")}
+                  </th>
                   <th></th>
                 </tr>
               </thead>
               <tbody>
-                {payments.map((p) => (
+                {sortedItems.map((p) => (
                   <tr key={p.id}>
                     <td data-label="Tenant">{p.tenant_name}</td>
                     <td data-label="Month">{p.month}</td>

@@ -21,7 +21,7 @@ export default function Sidebar() {
     <aside className="sidebar">
       <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 10px 22px" }}>
         <div style={{ fontSize: 22 }}>🏘️</div>
-        <div style={{ fontWeight: 800, fontSize: 17 }}>RentalOS</div>
+        <div style={{ fontWeight: 800, fontSize: 15, lineHeight: 1.2 }}>FlatOwner Webapp</div>
       </div>
 
       <nav style={{ display: "flex", flexDirection: "column", gap: 2, flex: 1 }}>

@@ -13,7 +13,7 @@ export default function ContactWebDevPage() {
     e.preventDefault();
 
     const text =
-      `New message from RentalOS Contact page:%0A%0A` +
+      `New message from FlatOwner Webapp Contact page:%0A%0A` +
       `Name: ${encodeURIComponent(form.name)}%0A` +
       `Concern: ${encodeURIComponent(form.concern)}%0A` +
       `Message: ${encodeURIComponent(form.message)}`;

@@ -14,6 +14,7 @@ import TenantsPage from "./pages/TenantsPage";
 import PaymentsPage from "./pages/PaymentsPage";
 import ExpensesPage from "./pages/ExpensesPage";
 import ReportsPage from "./pages/ReportsPage";
+import ContactWebDevPage from "./pages/ContactWebDevPage";
 
 function ProtectedLayout({ children }) {
   const { isAuthenticated } = useAuth();
@@ -41,6 +42,7 @@ function AppRoutes() {
       <Route path="/payments" element={<ProtectedLayout><PaymentsPage /></ProtectedLayout>} />
       <Route path="/expenses" element={<ProtectedLayout><ExpensesPage /></ProtectedLayout>} />
       <Route path="/reports" element={<ProtectedLayout><ReportsPage /></ProtectedLayout>} />
+      <Route path="/contact" element={<ProtectedLayout><ContactWebDevPage /></ProtectedLayout>} />
 
       <Route path="/" element={<Navigate to="/dashboard" replace />} />
       <Route path="*" element={<Navigate to="/dashboard" replace />} />

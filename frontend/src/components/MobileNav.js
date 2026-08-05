@@ -10,6 +10,7 @@ const NAV_ITEMS = [
   { to: "/payments", label: "Payments", icon: "💳" },
   { to: "/expenses", label: "Expenses", icon: "🧾" },
   { to: "/reports", label: "Reports", icon: "📊" },
+  { to: "/contact", label: "Contact Dev", icon: "💬" },
 ];
 
 export default function MobileNav() {

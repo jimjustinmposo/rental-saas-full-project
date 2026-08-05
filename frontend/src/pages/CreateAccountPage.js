@@ -28,9 +28,9 @@ export default function CreateAccountPage() {
 
     try {
       // FIXED ROUTE — THIS IS THE CORRECT ONE
-      await apiClient.post("/api/auth/verify-admin-password", {
-        password: adminPassword
-      });
+ await apiClient.post("/auth/verify-admin-password", {
+  password: adminPassword
+});
 
       setAdminUnlocked(true);
     } catch (err) {

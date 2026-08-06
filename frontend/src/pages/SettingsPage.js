@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { useAuth } from "../api/AuthContext";
 import { CURRENCIES, formatMoney } from "../utils/currency";
+import SearchableSelect from "../components/SearchableSelect";
 
 export default function SettingsPage() {
   const { owner, updateCurrency } = useAuth();
@@ -42,18 +43,12 @@ export default function SettingsPage() {
 
         <form onSubmit={handleSave}>
           <label className="field-label">Currency</label>
-          <select
-            className="input-field"
+          <SearchableSelect
+            options={CURRENCIES.map((c) => ({ value: c.code, label: `${c.label} (${c.code}) — ${c.symbol}` }))}
             value={selected}
-            onChange={(e) => setSelected(e.target.value)}
-            style={{ marginBottom: 10 }}
-          >
-            {CURRENCIES.map((c) => (
-              <option key={c.code} value={c.code}>
-                {c.label} ({c.code}) — {c.symbol}
-              </option>
-            ))}
-          </select>
+            onChange={(val) => setSelected(val)}
+            placeholder="Search currencies…"
+          />
 
           <div style={{ fontSize: 13, color: "var(--color-text-muted)", marginBottom: 16 }}>
             Preview: <strong style={{ color: "var(--color-text)" }}>{formatMoney(1250, selected)}</strong>

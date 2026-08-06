@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import SearchableSelect from "../components/SearchableSelect";
 
 const WHATSAPP_NUMBER = "971501905318"; // no +, no spaces, no leading 00
 
@@ -140,21 +141,19 @@ export default function ContactWebDevPage() {
             />
 
             <label className="field-label">Concern</label>
-            <select
-              className="input-field"
-              name="concern"
+            <SearchableSelect
+              options={[
+                { value: "Bug report", label: "Bug report" },
+                { value: "Feature request", label: "Feature request" },
+                { value: "Account access", label: "Account access" },
+                { value: "Billing question", label: "Billing question" },
+                { value: "Other", label: "Other" },
+              ]}
               value={form.concern}
-              onChange={handleChange}
+              onChange={(val) => setForm({ ...form, concern: val })}
+              placeholder="Search topics…"
               required
-              style={{ marginBottom: 14 }}
-            >
-              <option value="">Select a topic…</option>
-              <option value="Bug report">Bug report</option>
-              <option value="Feature request">Feature request</option>
-              <option value="Account access">Account access</option>
-              <option value="Billing question">Billing question</option>
-              <option value="Other">Other</option>
-            </select>
+            />
 
             <label className="field-label">Message</label>
             <textarea

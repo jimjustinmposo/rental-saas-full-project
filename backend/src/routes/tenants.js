@@ -124,6 +124,14 @@ router.put("/:id", async (req, res) => {
       unitIdChanged = true;
     }
 
+    // Keep status and unit assignment in sync when the caller only changed
+    // one of the two: clearing the unit implies the tenant moved out;
+    // assigning a unit implies they're active.
+    let resolvedStatus = status;
+    if (resolvedStatus === undefined && unitIdChanged) {
+      resolvedStatus = nextUnitId === null ? "Unassigned" : "Active";
+    }
+
     const fields = [];
     const values = [];
     let i = 1;
@@ -140,6 +148,7 @@ router.put("/:id", async (req, res) => {
     if (deposit !== undefined) set("deposit", deposit);
     if (image_url !== undefined) set("image_url", image_url);
     if (status !== undefined) set("status", status);
+    else if (resolvedStatus !== undefined) set("status", resolvedStatus);
 
     if (fields.length === 0) {
       return res.json(existing.rows[0]); // nothing to update

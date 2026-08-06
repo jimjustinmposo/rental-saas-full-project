@@ -172,7 +172,13 @@ export default function TenantsPage() {
                   ...units.map((u) => ({ value: u.id, label: `${u.apartment_name} — ${u.unit_number}` })),
                 ]}
                 value={form.unit_id}
-                onChange={(val) => setForm({ ...form, unit_id: val })}
+                onChange={(val) =>
+                  setForm({
+                    ...form,
+                    unit_id: val,
+                    status: val === "" ? "Unassigned" : "Active",
+                  })
+                }
                 placeholder="Search apartment or unit number…"
               />
             </div>
@@ -205,14 +211,15 @@ export default function TenantsPage() {
             </div>
             <div>
               <label className="field-label">Status</label>
-              <select
-                className="input-field"
+              <SearchableSelect
+                options={[
+                  { value: "Active", label: "Active" },
+                  { value: "Unassigned", label: "Unassigned (moved out)" },
+                ]}
                 value={form.status}
-                onChange={(e) => setForm({ ...form, status: e.target.value })}
-              >
-                <option value="Active">Active</option>
-                <option value="Unassigned">Unassigned (moved out)</option>
-              </select>
+                onChange={(val) => setForm({ ...form, status: val })}
+                placeholder="Search status…"
+              />
             </div>
           </div>
           {editingId && form.status === "Unassigned" && (

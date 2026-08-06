@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import apiClient from "../api/apiClient";
 import { useAuth } from "../api/AuthContext";
 import { formatMoney } from "../utils/currency";
+import { formatMonthLabel } from "../utils/month";
 import SearchableSelect from "../components/SearchableSelect";
 
 export default function ReportsPage() {
@@ -133,7 +134,7 @@ export default function ReportsPage() {
               <tbody>
                 {history.map((r) => (
                   <tr key={r.id}>
-                    <td data-label="Month">{r.month}</td>
+                    <td data-label="Month">{formatMonthLabel(r.month)}</td>
                     <td data-label="Apartment">{r.apartment_name || "All"}</td>
                     <td data-label="Income">{formatMoney(r.total_income, currency)}</td>
                     <td data-label="Expenses">{formatMoney(r.total_expenses, currency)}</td>

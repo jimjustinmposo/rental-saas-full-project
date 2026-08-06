@@ -130,14 +130,15 @@ export default function UnitsPage() {
             </div>
             <div>
               <label className="field-label">Status</label>
-              <select
-                className="input-field"
+              <SearchableSelect
+                options={[
+                  { value: "Vacant", label: "Vacant" },
+                  { value: "Occupied", label: "Occupied" },
+                ]}
                 value={form.status}
-                onChange={(e) => setForm({ ...form, status: e.target.value })}
-              >
-                <option value="Vacant">Vacant</option>
-                <option value="Occupied">Occupied</option>
-              </select>
+                onChange={(val) => setForm({ ...form, status: val })}
+                placeholder="Search status…"
+              />
             </div>
           </div>
           <button type="submit" className="btn btn-primary" style={{ marginTop: 16 }}>

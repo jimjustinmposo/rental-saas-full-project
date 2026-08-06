@@ -73,7 +73,7 @@ export default function UnitsPage() {
       (u) =>
         u.apartment_name?.toLowerCase().includes(q) ||
         u.unit_number?.toLowerCase().includes(q) ||
-        u.status?.toLowerCase().includes(q)
+        u.tenant_name?.toLowerCase().includes(q)
     );
   }, [units, search]);
 
@@ -149,7 +149,7 @@ export default function UnitsPage() {
       <div className="search-bar">
         <span>🔍</span>
         <input
-          placeholder="Search by apartment, unit #, or status…"
+          placeholder="Search by apartment, unit #, or tenant…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
@@ -176,8 +176,8 @@ export default function UnitsPage() {
                   <th className="sortable" onClick={() => requestSort("current_rent")}>
                     Rent{sortIndicator("current_rent")}
                   </th>
-                  <th className="sortable" onClick={() => requestSort("status")}>
-                    Status{sortIndicator("status")}
+                  <th className="sortable" onClick={() => requestSort("tenant_name")}>
+                    Tenant{sortIndicator("tenant_name")}
                   </th>
                   <th></th>
                 </tr>
@@ -188,9 +188,9 @@ export default function UnitsPage() {
                     <td data-label="Apartment">{u.apartment_name}</td>
                     <td data-label="Unit #">{u.unit_number}</td>
                     <td data-label="Rent">{formatMoney(u.current_rent, currency)}</td>
-                    <td data-label="Status">
-                      <span className={`pill ${u.status === "Occupied" ? "pill-success" : "pill-warning"}`}>
-                        {u.status}
+                    <td data-label="Tenant">
+                      <span className={`pill ${u.tenant_name ? "pill-success" : "pill-warning"}`}>
+                        {u.tenant_name || "Vacant"}
                       </span>
                     </td>
                     <td data-label="" style={{ display: "flex", gap: 8 }}>

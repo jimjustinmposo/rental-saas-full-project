@@ -10,9 +10,10 @@ router.get("/", async (req, res) => {
   const { apartment_id } = req.query;
   try {
     const params = [req.ownerId];
-    let query = `SELECT u.*, a.name AS apartment_name
+    let query = `SELECT u.*, a.name AS apartment_name, t.name AS tenant_name
                  FROM units u
                  JOIN apartments a ON a.id = u.apartment_id
+                 LEFT JOIN tenants t ON t.unit_id = u.id AND t.status = 'Active'
                  WHERE u.owner_id = $1`;
     if (apartment_id) {
       params.push(apartment_id);

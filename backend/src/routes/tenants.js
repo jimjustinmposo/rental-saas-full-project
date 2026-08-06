@@ -58,18 +58,19 @@ router.get("/", async (req, res) => {
 
 // POST /api/tenants
 router.post("/", async (req, res) => {
-  const { name, phone, unit_id, move_in, deposit, image_url, status } = req.body;
+  const { name, phone, unit_id, move_in, move_out, deposit, image_url, status } = req.body;
   if (!name) return res.status(400).json({ error: "Tenant name is required." });
   try {
     const result = await pool.query(
-      `INSERT INTO tenants (owner_id, name, phone, unit_id, move_in, deposit, image_url, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+      `INSERT INTO tenants (owner_id, name, phone, unit_id, move_in, move_out, deposit, image_url, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
       [
         req.ownerId,
         name,
         phone || null,
         unit_id || null,
         move_in || null,
+        move_out || null,
         deposit || 0,
         image_url || null,
         status === "Unassigned" ? "Unassigned" : "Active",
@@ -95,7 +96,7 @@ router.post("/", async (req, res) => {
 // clear their unit assignment and flip that unit back to Vacant — unless
 // the caller explicitly passed a new unit_id in the same request.
 router.put("/:id", async (req, res) => {
-  const { name, phone, unit_id, move_in, deposit, image_url, status } = req.body;
+  const { name, phone, unit_id, move_in, move_out, deposit, image_url, status } = req.body;
   try {
     const existing = await pool.query(
       "SELECT * FROM tenants WHERE id = $1 AND owner_id = $2",
@@ -128,6 +129,7 @@ router.put("/:id", async (req, res) => {
     if (phone !== undefined) set("phone", phone);
     if (unitIdChanged) set("unit_id", nextUnitId);
     if (move_in !== undefined) set("move_in", move_in);
+    if (move_out !== undefined) set("move_out", move_out);
     if (deposit !== undefined) set("deposit", deposit);
     if (image_url !== undefined) set("image_url", image_url);
     if (status !== undefined) set("status", status);

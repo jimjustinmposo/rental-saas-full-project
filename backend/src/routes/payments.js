@@ -12,6 +12,11 @@ function computeStatus(amountDue, amountPaid) {
 }
 
 // GET /api/payments
+// Timeline rule: a tenant's records only ever show for the window they
+// actually rented — move_in <= record_month < move_out. This mostly
+// matters when a unit code gets reused by a new tenant later; each
+// payment always belongs to one specific tenant_id, so this is a safety
+// net against any payment ever being displayed against the wrong tenancy.
 router.get("/", async (req, res) => {
   try {
     const result = await pool.query(
@@ -21,6 +26,8 @@ router.get("/", async (req, res) => {
        LEFT JOIN units u ON u.id = p.unit_id
        LEFT JOIN apartments a ON a.id = p.apartment_id
        WHERE p.owner_id = $1
+         AND (t.move_in IS NULL OR to_date(p.month || '-01', 'YYYY-MM-DD') >= date_trunc('month', t.move_in))
+         AND (t.move_out IS NULL OR to_date(p.month || '-01', 'YYYY-MM-DD') < date_trunc('month', t.move_out))
        ORDER BY p.payment_date DESC NULLS LAST, p.id DESC`,
       [req.ownerId]
     );

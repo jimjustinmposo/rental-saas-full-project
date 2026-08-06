@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import apiClient from "../api/apiClient";
 import { useAuth } from "../api/AuthContext";
 import { formatMoney } from "../utils/currency";
-import { currentMonthValue } from "../utils/month";
+import { formatMonthLabel } from "../utils/month";
 
 export default function PendingPayments() {
   const navigate = useNavigate();
@@ -14,20 +14,28 @@ export default function PendingPayments() {
 
   useEffect(() => {
     apiClient
-      .get("/reports/pending", { params: { month: currentMonthValue() } })
+      .get("/reports/pending-all")
       .then((res) => setPending(res.data.pending))
       .finally(() => setLoading(false));
   }, []);
 
+  const grandTotal = pending.reduce((sum, p) => sum + Number(p.total_pending || 0), 0);
+
   return (
     <div className="card">
-      <div className="card-title" style={{ marginBottom: 12 }}>
-        Pending Payments This Month
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
+        <div className="card-title">Pending Payments — All Time</div>
+        {pending.length > 0 && (
+          <span className="pill pill-danger">{formatMoney(grandTotal, currency)} total owed</span>
+        )}
       </div>
+      <p style={{ fontSize: 12.5, color: "var(--color-text-muted)", marginBottom: 12 }}>
+        Every unpaid or partially-paid balance on record, across all months — not just this month.
+      </p>
       {loading ? (
         <div className="empty-state">Loading…</div>
       ) : pending.length === 0 ? (
-        <div className="empty-state">Everyone's paid up for this month 🎉</div>
+        <div className="empty-state">No outstanding balances anywhere 🎉</div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column" }}>
           {pending.map((t, i) => (
@@ -48,12 +56,21 @@ export default function PendingPayments() {
               onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
             >
               <div>
-                <div style={{ fontWeight: 700, fontSize: 14 }}>{t.tenant_name}</div>
+                <div style={{ fontWeight: 700, fontSize: 14 }}>
+                  {t.tenant_name}
+                  {t.tenant_status === "Unassigned" && (
+                    <span style={{ fontWeight: 500, color: "var(--color-text-faint)" }}> (moved out)</span>
+                  )}
+                </div>
                 <div style={{ fontSize: 12.5, color: "var(--color-text-muted)" }}>
-                  {t.apartment_name ? `${t.apartment_name} · ${t.unit_number}` : "No unit assigned"}
+                  {t.apartment_name ? `${t.apartment_name} · ${t.unit_number}` : "No unit assigned"} ·{" "}
+                  {t.unpaid_months} month{t.unpaid_months !== 1 ? "s" : ""} unpaid
+                  {t.unpaid_month_list && t.unpaid_month_list.length > 0 && (
+                    <> ({t.unpaid_month_list.map(formatMonthLabel).join(", ")})</>
+                  )}
                 </div>
               </div>
-              <span className="pill pill-danger">{formatMoney(t.current_rent, currency)} due</span>
+              <span className="pill pill-danger">{formatMoney(t.total_pending, currency)}</span>
             </div>
           ))}
         </div>

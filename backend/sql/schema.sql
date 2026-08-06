@@ -51,6 +51,10 @@ CREATE TABLE IF NOT EXISTS tenants (
 -- by the owner (not auto-derived from unit assignment).
 ALTER TABLE tenants ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'Active';
 
+-- Move-out date, used to scope a tenant's visible records to their actual
+-- tenancy window (move_in <= record_date < move_out).
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS move_out DATE;
+
 CREATE TABLE IF NOT EXISTS payments (
   id SERIAL PRIMARY KEY,
   owner_id INT REFERENCES owners(id) ON DELETE CASCADE,

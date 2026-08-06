@@ -60,7 +60,11 @@ export default function DashboardPage() {
         <>
           <SummaryCards summary={summary} />
 
-          <div className="dashboard-row-3">
+          <div style={{ marginTop: 20 }}>
+            <PaymentChecklist />
+          </div>
+
+          <div className="dashboard-row-3" style={{ marginTop: 20 }}>
             <IncomeExpensesChart data={summary?.monthlyTrend} />
             <ApartmentsOverview apartments={apartments} />
             <MonthlyReportSummary summary={summary} />
@@ -71,8 +75,7 @@ export default function DashboardPage() {
             <LatestExpensesTable expenses={summary?.latestExpenses} />
           </div>
 
-          <div className="dashboard-row-3" style={{ gridTemplateColumns: "1.4fr 1fr", marginTop: 20 }}>
-            <PaymentChecklist />
+          <div style={{ marginTop: 20 }}>
             <PendingPayments />
           </div>
         </>

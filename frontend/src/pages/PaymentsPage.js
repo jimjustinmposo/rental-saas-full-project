@@ -5,6 +5,7 @@ import { useSortableData } from "../hooks/useSortableData";
 import { useAuth } from "../api/AuthContext";
 import { formatMoney } from "../utils/currency";
 import { formatMonthLabel } from "../utils/month";
+import SearchableSelect from "../components/SearchableSelect";
 
 const emptyForm = {
   tenant_id: "",
@@ -141,18 +142,14 @@ export default function PaymentsPage() {
           <div className="form-grid">
             <div>
               <label className="field-label">Tenant</label>
-              <select
-                className="input-field"
+              <SearchableSelect
+                options={tenants.map((t) => ({ value: t.id, label: t.name }))}
                 value={form.tenant_id}
-                onChange={(e) => handleTenantSelect(e.target.value)}
+                onChange={(val) => handleTenantSelect(val)}
+                placeholder="Search tenants…"
                 required
                 disabled={!!editingId}
-              >
-                <option value="">Select tenant…</option>
-                {tenants.map((t) => (
-                  <option key={t.id} value={t.id}>{t.name}</option>
-                ))}
-              </select>
+              />
             </div>
             <div>
               <label className="field-label">Month (e.g. 2026-08)</label>

@@ -2,8 +2,9 @@ import React, { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import apiClient from "../api/apiClient";
 import { useAuth } from "../api/AuthContext";
+import SearchableSelect from "../components/SearchableSelect";
 
-const emptyForm = { name: "", phone: "", unit_id: "", move_in: "", deposit: "", status: "Active" };
+const emptyForm = { name: "", phone: "", unit_id: "", move_in: "", move_out: "", deposit: "", status: "Active" };
 
 export default function TenantsPage() {
   const navigate = useNavigate();
@@ -79,6 +80,7 @@ export default function TenantsPage() {
       phone: t.phone || "",
       unit_id: t.unit_id || "",
       move_in: t.move_in ? t.move_in.slice(0, 10) : "",
+      move_out: t.move_out ? t.move_out.slice(0, 10) : "",
       deposit: t.deposit || "",
       status: t.status || "Active",
     });
@@ -164,18 +166,15 @@ export default function TenantsPage() {
             </div>
             <div>
               <label className="field-label">Unit</label>
-              <select
-                className="input-field"
+              <SearchableSelect
+                options={[
+                  { value: "", label: "Unassigned (no unit)" },
+                  ...units.map((u) => ({ value: u.id, label: `${u.apartment_name} — ${u.unit_number}` })),
+                ]}
                 value={form.unit_id}
-                onChange={(e) => setForm({ ...form, unit_id: e.target.value })}
-              >
-                <option value="">Unassigned (no unit)</option>
-                {units.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.apartment_name} — {u.unit_number}
-                  </option>
-                ))}
-              </select>
+                onChange={(val) => setForm({ ...form, unit_id: val })}
+                placeholder="Search apartment or unit number…"
+              />
             </div>
             <div>
               <label className="field-label">Move-in date</label>
@@ -184,6 +183,15 @@ export default function TenantsPage() {
                 className="input-field"
                 value={form.move_in}
                 onChange={(e) => setForm({ ...form, move_in: e.target.value })}
+              />
+            </div>
+            <div>
+              <label className="field-label">Move-out date</label>
+              <input
+                type="date"
+                className="input-field"
+                value={form.move_out}
+                onChange={(e) => setForm({ ...form, move_out: e.target.value })}
               />
             </div>
             <div>

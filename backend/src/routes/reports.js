@@ -307,4 +307,46 @@ router.get("/history", async (req, res) => {
   }
 });
 
+// DELETE /api/reports/history — wipes all saved report snapshots for this
+// owner, resetting the reporting module to a clean, empty state.
+router.delete("/history", async (req, res) => {
+  try {
+    const result = await pool.query(
+      "DELETE FROM monthly_reports WHERE owner_id = $1 RETURNING id",
+      [req.ownerId]
+    );
+    res.json({ success: true, deletedCount: result.rowCount });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to clear report history." });
+  }
+});
+
+// GET /api/reports/pending-all
+// ALL outstanding balances across every recorded month, not just the
+// current one — sums every Unpaid/Late payment row per tenant.
+router.get("/pending-all", async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT t.id AS tenant_id, t.name AS tenant_name, t.status AS tenant_status,
+              a.name AS apartment_name, u.unit_number,
+              SUM(p.balance) AS total_pending,
+              COUNT(*) AS unpaid_months,
+              array_agg(p.month ORDER BY p.month) AS unpaid_month_list
+       FROM payments p
+       JOIN tenants t ON t.id = p.tenant_id
+       LEFT JOIN units u ON u.id = p.unit_id
+       LEFT JOIN apartments a ON a.id = p.apartment_id
+       WHERE p.owner_id = $1 AND p.balance > 0
+       GROUP BY t.id, t.name, t.status, a.name, u.unit_number
+       ORDER BY total_pending DESC`,
+      [req.ownerId]
+    );
+    res.json({ pending: result.rows });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to load pending balances." });
+  }
+});
+
 module.exports = router;

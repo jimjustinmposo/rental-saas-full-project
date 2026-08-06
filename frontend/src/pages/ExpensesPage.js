@@ -3,6 +3,7 @@ import apiClient from "../api/apiClient";
 import { useSortableData } from "../hooks/useSortableData";
 import { useAuth } from "../api/AuthContext";
 import { formatMoney } from "../utils/currency";
+import SearchableSelect from "../components/SearchableSelect";
 
 const emptyForm = { apartment_id: "", description: "", amount: "", date: "" };
 
@@ -90,17 +91,13 @@ export default function ExpensesPage() {
           <div className="form-grid">
             <div>
               <label className="field-label">Apartment</label>
-              <select
-                className="input-field"
+              <SearchableSelect
+                options={apartments.map((a) => ({ value: a.id, label: a.name }))}
                 value={form.apartment_id}
-                onChange={(e) => setForm({ ...form, apartment_id: e.target.value })}
+                onChange={(val) => setForm({ ...form, apartment_id: val })}
+                placeholder="Search apartments…"
                 required
-              >
-                <option value="">Select apartment…</option>
-                {apartments.map((a) => (
-                  <option key={a.id} value={a.id}>{a.name}</option>
-                ))}
-              </select>
+              />
             </div>
             <div>
               <label className="field-label">Amount ({currency})</label>

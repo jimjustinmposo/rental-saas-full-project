@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import apiClient from "../api/apiClient";
 import { useAuth } from "../api/AuthContext";
 import { formatMoney } from "../utils/currency";
+import SearchableSelect from "../components/SearchableSelect";
 
 export default function ReportsPage() {
   const { owner } = useAuth();
@@ -46,6 +47,12 @@ export default function ReportsPage() {
     loadHistory();
   };
 
+  const handleClearHistory = async () => {
+    if (!window.confirm("Permanently delete ALL saved report history? This cannot be undone.")) return;
+    await apiClient.delete("/reports/history");
+    loadHistory();
+  };
+
   return (
     <div>
       <div className="page-header">
@@ -56,12 +63,12 @@ export default function ReportsPage() {
         <div className="form-grid">
           <div>
             <label className="field-label">Apartment (optional)</label>
-            <select className="input-field" value={apartmentId} onChange={(e) => setApartmentId(e.target.value)}>
-              <option value="">All apartments</option>
-              {apartments.map((a) => (
-                <option key={a.id} value={a.id}>{a.name}</option>
-              ))}
-            </select>
+            <SearchableSelect
+              options={[{ value: "", label: "All apartments" }, ...apartments.map((a) => ({ value: a.id, label: a.name }))]}
+              value={apartmentId}
+              onChange={(val) => setApartmentId(val)}
+              placeholder="Search apartments…"
+            />
           </div>
           <div>
             <label className="field-label">Month (e.g. 2026-08)</label>
@@ -101,7 +108,14 @@ export default function ReportsPage() {
       )}
 
       <div className="card">
-        <div className="card-title" style={{ marginBottom: 12 }}>Saved Report History</div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
+          <div className="card-title">Saved Report History</div>
+          {history.length > 0 && (
+            <button className="btn btn-danger" style={{ padding: "6px 12px", fontSize: 13 }} onClick={handleClearHistory}>
+              Clear All History
+            </button>
+          )}
+        </div>
         {history.length === 0 ? (
           <div className="empty-state">No saved reports yet.</div>
         ) : (

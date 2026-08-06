@@ -41,7 +41,7 @@ export default function PaymentChecklist() {
   return (
     <div className="card">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
-        <div className="card-title">Paid Tenants Checklist</div>
+        <div className="card-title">Paid Tenant Checklist</div>
         <input
           type="month"
           className="input-field"

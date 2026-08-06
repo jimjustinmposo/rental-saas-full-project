@@ -47,7 +47,7 @@ export default function SummaryCards({ summary }) {
         label="Net Profit"
         value={formatMoney(summary.netProfit, currency)}
         sublabel={`${rangeLabel} · view reports`}
-        tone="success"
+        tone={summary.netProfit >= 0 ? "success" : "danger"}
         onClick={() => navigate("/reports")}
       />
       <Card

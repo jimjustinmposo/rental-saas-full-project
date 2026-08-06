@@ -96,7 +96,7 @@ export default function ReportsPage() {
             </div>
             <div>
               <div style={{ fontSize: 13, color: "var(--color-text-muted)" }}>Profit</div>
-              <div style={{ fontSize: 22, fontWeight: 800, color: "var(--color-success)" }}>
+              <div style={{ fontSize: 22, fontWeight: 800, color: result.profit >= 0 ? "var(--color-success)" : "var(--color-danger)" }}>
                 {formatMoney(result.profit, currency)}
               </div>
             </div>

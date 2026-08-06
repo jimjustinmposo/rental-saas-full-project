@@ -42,7 +42,7 @@ export default function MonthlyReportSummary({ summary }) {
       <Row label="Income" value={summary.totalIncome} currency={currency} />
       <Row label="Expenses" value={summary.totalExpenses} currency={currency} tone="danger" />
       <div style={{ paddingTop: 4 }}>
-        <Row label="Net Profit" value={summary.netProfit} currency={currency} tone="success" />
+        <Row label="Net Profit" value={summary.netProfit} currency={currency} tone={summary.netProfit >= 0 ? "success" : "danger"} />
       </div>
     </div>
   );

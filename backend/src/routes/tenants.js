@@ -78,6 +78,13 @@ router.post("/", async (req, res) => {
     );
 
     if (unit_id) {
+      // Rule: one active tenant per unit — moving a new tenant in
+      // automatically moves the previous occupant out.
+      await pool.query(
+        `UPDATE tenants SET status = 'Unassigned', unit_id = NULL
+         WHERE unit_id = $1 AND owner_id = $2 AND status = 'Active' AND id <> $3`,
+        [unit_id, req.ownerId, result.rows[0].id]
+      );
       await pool.query(
         "UPDATE units SET status = 'Occupied' WHERE id = $1 AND owner_id = $2",
         [unit_id, req.ownerId]
@@ -153,6 +160,13 @@ router.put("/:id", async (req, res) => {
     }
     // Mark the new unit occupied if one was assigned.
     if (unitIdChanged && nextUnitId) {
+      // Rule: one active tenant per unit — assigning this tenant here
+      // automatically moves out whoever else was active in that unit.
+      await pool.query(
+        `UPDATE tenants SET status = 'Unassigned', unit_id = NULL
+         WHERE unit_id = $1 AND owner_id = $2 AND status = 'Active' AND id <> $3`,
+        [nextUnitId, req.ownerId, req.params.id]
+      );
       await pool.query(
         "UPDATE units SET status = 'Occupied' WHERE id = $1 AND owner_id = $2",
         [nextUnitId, req.ownerId]

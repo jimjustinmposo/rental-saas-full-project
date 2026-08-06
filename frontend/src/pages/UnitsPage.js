@@ -2,8 +2,12 @@ import React, { useEffect, useState, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import apiClient from "../api/apiClient";
 import { useSortableData } from "../hooks/useSortableData";
+import { useAuth } from "../api/AuthContext";
+import { formatMoney } from "../utils/currency";
 
 export default function UnitsPage() {
+  const { owner } = useAuth();
+  const currency = owner?.currency || "USD";
   const [searchParams] = useSearchParams();
   const [units, setUnits] = useState([]);
   const [apartments, setApartments] = useState([]);
@@ -119,7 +123,7 @@ export default function UnitsPage() {
               />
             </div>
             <div>
-              <label className="field-label">Monthly rent ($)</label>
+              <label className="field-label">Monthly rent ({currency})</label>
               <input
                 type="number"
                 className="input-field"
@@ -186,7 +190,7 @@ export default function UnitsPage() {
                   <tr key={u.id}>
                     <td data-label="Apartment">{u.apartment_name}</td>
                     <td data-label="Unit #">{u.unit_number}</td>
-                    <td data-label="Rent">${Number(u.current_rent).toLocaleString()}</td>
+                    <td data-label="Rent">{formatMoney(u.current_rent, currency)}</td>
                     <td data-label="Status">
                       <span className={`pill ${u.status === "Occupied" ? "pill-success" : "pill-warning"}`}>
                         {u.status}

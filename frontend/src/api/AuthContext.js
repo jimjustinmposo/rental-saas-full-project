@@ -35,8 +35,20 @@ export function AuthProvider({ children }) {
     setOwner(null);
   }, []);
 
+  const updateCurrency = useCallback(async (currency) => {
+    const res = await apiClient.put("/auth/currency", { currency });
+    setOwner((prev) => {
+      const updated = { ...prev, currency: res.data.currency };
+      localStorage.setItem("owner", JSON.stringify(updated));
+      return updated;
+    });
+    return res.data;
+  }, []);
+
   return (
-    <AuthContext.Provider value={{ owner, token, login, signup, logout, isAuthenticated: !!token }}>
+    <AuthContext.Provider
+      value={{ owner, token, login, signup, logout, updateCurrency, isAuthenticated: !!token }}
+    >
       {children}
     </AuthContext.Provider>
   );

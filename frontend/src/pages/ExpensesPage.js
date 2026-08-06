@@ -1,12 +1,19 @@
 import React, { useEffect, useState, useMemo } from "react";
 import apiClient from "../api/apiClient";
 import { useSortableData } from "../hooks/useSortableData";
+import { useAuth } from "../api/AuthContext";
+import { formatMoney } from "../utils/currency";
+
+const emptyForm = { apartment_id: "", description: "", amount: "", date: "" };
 
 export default function ExpensesPage() {
+  const { owner } = useAuth();
+  const currency = owner?.currency || "USD";
   const [expenses, setExpenses] = useState([]);
   const [apartments, setApartments] = useState([]);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ apartment_id: "", category: "", description: "", amount: "", date: "" });
+  const [editingId, setEditingId] = useState(null);
+  const [form, setForm] = useState(emptyForm);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
 
@@ -19,12 +26,33 @@ export default function ExpensesPage() {
 
   useEffect(load, []);
 
+  const resetForm = () => {
+    setForm(emptyForm);
+    setEditingId(null);
+    setShowForm(false);
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
-    await apiClient.post("/expenses", form);
-    setForm({ apartment_id: "", category: "", description: "", amount: "", date: "" });
-    setShowForm(false);
+    if (editingId) {
+      await apiClient.put(`/expenses/${editingId}`, form);
+    } else {
+      await apiClient.post("/expenses", form);
+    }
+    resetForm();
     load();
+  };
+
+  const handleEditClick = (exp) => {
+    setEditingId(exp.id);
+    setForm({
+      apartment_id: exp.apartment_id || "",
+      description: exp.description || "",
+      amount: exp.amount,
+      date: exp.date ? exp.date.slice(0, 10) : "",
+    });
+    setShowForm(true);
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const handleDelete = async (id) => {
@@ -38,7 +66,6 @@ export default function ExpensesPage() {
     const q = search.toLowerCase();
     return expenses.filter(
       (e) =>
-        e.category?.toLowerCase().includes(q) ||
         e.description?.toLowerCase().includes(q) ||
         e.apartment_name?.toLowerCase().includes(q)
     );
@@ -50,7 +77,10 @@ export default function ExpensesPage() {
     <div>
       <div className="page-header">
         <h1>Expenses</h1>
-        <button className="btn btn-primary" onClick={() => setShowForm((s) => !s)}>
+        <button
+          className="btn btn-primary"
+          onClick={() => (showForm ? resetForm() : setShowForm(true))}
+        >
           {showForm ? "Cancel" : "+ Add Expense"}
         </button>
       </div>
@@ -64,25 +94,16 @@ export default function ExpensesPage() {
                 className="input-field"
                 value={form.apartment_id}
                 onChange={(e) => setForm({ ...form, apartment_id: e.target.value })}
+                required
               >
-                <option value="">General / Unassigned</option>
+                <option value="">Select apartment…</option>
                 {apartments.map((a) => (
                   <option key={a.id} value={a.id}>{a.name}</option>
                 ))}
               </select>
             </div>
             <div>
-              <label className="field-label">Category</label>
-              <input
-                className="input-field"
-                value={form.category}
-                onChange={(e) => setForm({ ...form, category: e.target.value })}
-                placeholder="Plumbing Repair"
-                required
-              />
-            </div>
-            <div>
-              <label className="field-label">Amount ($)</label>
+              <label className="field-label">Amount ({currency})</label>
               <input
                 type="number"
                 className="input-field"
@@ -106,11 +127,13 @@ export default function ExpensesPage() {
                 className="input-field"
                 value={form.description}
                 onChange={(e) => setForm({ ...form, description: e.target.value })}
+                placeholder="Plumbing repair, electric bill, maintenance supplies…"
+                required
               />
             </div>
           </div>
           <button type="submit" className="btn btn-primary" style={{ marginTop: 16 }}>
-            Save Expense
+            {editingId ? "Save Changes" : "Save Expense"}
           </button>
         </form>
       )}
@@ -118,7 +141,7 @@ export default function ExpensesPage() {
       <div className="search-bar">
         <span>🔍</span>
         <input
-          placeholder="Search by category, description, or apartment…"
+          placeholder="Search by description or apartment…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
@@ -136,17 +159,17 @@ export default function ExpensesPage() {
             <table className="data-table">
               <thead>
                 <tr>
-                  <th className="sortable" onClick={() => requestSort("category")}>
-                    Category{sortIndicator("category")}
-                  </th>
                   <th className="sortable" onClick={() => requestSort("apartment_name")}>
                     Apartment{sortIndicator("apartment_name")}
+                  </th>
+                  <th className="sortable" onClick={() => requestSort("date")}>
+                    Date{sortIndicator("date")}
                   </th>
                   <th className="sortable" onClick={() => requestSort("amount")}>
                     Amount{sortIndicator("amount")}
                   </th>
-                  <th className="sortable" onClick={() => requestSort("date")}>
-                    Date{sortIndicator("date")}
+                  <th className="sortable" onClick={() => requestSort("description")}>
+                    Description{sortIndicator("description")}
                   </th>
                   <th></th>
                 </tr>
@@ -154,11 +177,14 @@ export default function ExpensesPage() {
               <tbody>
                 {sortedItems.map((e) => (
                   <tr key={e.id}>
-                    <td data-label="Category">{e.category}</td>
-                    <td data-label="Apartment">{e.apartment_name || "General"}</td>
-                    <td data-label="Amount">${Number(e.amount).toLocaleString()}</td>
+                    <td data-label="Apartment">{e.apartment_name || "—"}</td>
                     <td data-label="Date">{e.date ? new Date(e.date).toLocaleDateString() : "—"}</td>
-                    <td data-label="">
+                    <td data-label="Amount">{formatMoney(e.amount, currency)}</td>
+                    <td data-label="Description">{e.description || "—"}</td>
+                    <td data-label="" style={{ display: "flex", gap: 8 }}>
+                      <button className="btn btn-secondary" style={{ padding: "6px 10px" }} onClick={() => handleEditClick(e)}>
+                        Edit
+                      </button>
                       <button className="btn btn-danger" style={{ padding: "6px 10px" }} onClick={() => handleDelete(e.id)}>
                         Delete
                       </button>

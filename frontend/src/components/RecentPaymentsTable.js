@@ -1,5 +1,7 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
+import { useAuth } from "../api/AuthContext";
+import { formatMoney } from "../utils/currency";
 
 const statusPill = (status) => {
   const cls = status === "Paid" ? "pill-success" : status === "Late" ? "pill-warning" : "pill-danger";
@@ -8,6 +10,8 @@ const statusPill = (status) => {
 
 export default function RecentPaymentsTable({ payments }) {
   const navigate = useNavigate();
+  const { owner } = useAuth();
+  const currency = owner?.currency || "USD";
 
   return (
     <div className="card">
@@ -38,7 +42,7 @@ export default function RecentPaymentsTable({ payments }) {
                 >
                   <td data-label="Tenant">{p.tenant_name || "—"}</td>
                   <td data-label="Month">{p.month}</td>
-                  <td data-label="Amount Paid">${Number(p.amount_paid).toLocaleString()}</td>
+                  <td data-label="Amount Paid">{formatMoney(p.amount_paid, currency)}</td>
                   <td data-label="Status">{statusPill(p.status)}</td>
                 </tr>
               ))}

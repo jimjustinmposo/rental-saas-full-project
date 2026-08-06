@@ -1,5 +1,7 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
+import { useAuth } from "../api/AuthContext";
+import { formatMoney } from "../utils/currency";
 
 function Card({ label, value, sublabel, tone, onClick }) {
   const toneColor =
@@ -15,33 +17,36 @@ function Card({ label, value, sublabel, tone, onClick }) {
   );
 }
 
-const fmt = (n) => `$${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+const RANGE_LABEL = { month: "This month", year: "This year", all: "All time" };
 
 export default function SummaryCards({ summary }) {
   const navigate = useNavigate();
+  const { owner } = useAuth();
+  const currency = owner?.currency || "USD";
   if (!summary) return null;
   const occupancyPct =
     summary.totalUnits > 0 ? Math.round((summary.occupiedUnits / summary.totalUnits) * 100) : 0;
+  const rangeLabel = RANGE_LABEL[summary.range] || "This month";
 
   return (
     <div className="summary-cards-grid">
       <Card
         label="Total Income"
-        value={fmt(summary.totalIncome)}
-        sublabel="This month · view payments"
+        value={formatMoney(summary.totalIncome, currency)}
+        sublabel={`${rangeLabel} · view payments`}
         onClick={() => navigate("/payments")}
       />
       <Card
         label="Total Expenses"
-        value={fmt(summary.totalExpenses)}
-        sublabel="This month · view expenses"
+        value={formatMoney(summary.totalExpenses, currency)}
+        sublabel={`${rangeLabel} · view expenses`}
         tone="danger"
         onClick={() => navigate("/expenses")}
       />
       <Card
         label="Net Profit"
-        value={fmt(summary.netProfit)}
-        sublabel="This month · view reports"
+        value={formatMoney(summary.netProfit, currency)}
+        sublabel={`${rangeLabel} · view reports`}
         tone="success"
         onClick={() => navigate("/reports")}
       />

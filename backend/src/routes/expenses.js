@@ -25,16 +25,20 @@ router.get("/", async (req, res) => {
 });
 
 // POST /api/expenses
+// Structure per spec: Apartment, Date, Amount, Description. No category.
 router.post("/", async (req, res) => {
-  const { apartment_id, unit_id, category, description, amount, date } = req.body;
-  if (!category || amount === undefined) {
-    return res.status(400).json({ error: "category and amount are required." });
+  const { apartment_id, unit_id, description, amount, date } = req.body;
+  if (!apartment_id) {
+    return res.status(400).json({ error: "apartment_id is required." });
+  }
+  if (amount === undefined || amount === null || amount === "") {
+    return res.status(400).json({ error: "amount is required." });
   }
   try {
     const result = await pool.query(
-      `INSERT INTO expenses (owner_id, apartment_id, unit_id, category, description, amount, date)
-       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-      [req.ownerId, apartment_id || null, unit_id || null, category, description || null, amount, date || null]
+      `INSERT INTO expenses (owner_id, apartment_id, unit_id, description, amount, date)
+       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+      [req.ownerId, apartment_id, unit_id || null, description || null, amount, date || null]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -45,16 +49,17 @@ router.post("/", async (req, res) => {
 
 // PUT /api/expenses/:id
 router.put("/:id", async (req, res) => {
-  const { category, description, amount, date } = req.body;
+  const { apartment_id, unit_id, description, amount, date } = req.body;
   try {
     const result = await pool.query(
       `UPDATE expenses SET
-         category = COALESCE($1, category),
-         description = COALESCE($2, description),
-         amount = COALESCE($3, amount),
-         date = COALESCE($4, date)
-       WHERE id = $5 AND owner_id = $6 RETURNING *`,
-      [category, description, amount, date, req.params.id, req.ownerId]
+         apartment_id = COALESCE($1, apartment_id),
+         unit_id = COALESCE($2, unit_id),
+         description = COALESCE($3, description),
+         amount = COALESCE($4, amount),
+         date = COALESCE($5, date)
+       WHERE id = $6 AND owner_id = $7 RETURNING *`,
+      [apartment_id, unit_id, description, amount, date, req.params.id, req.ownerId]
     );
     if (!result.rows[0]) return res.status(404).json({ error: "Expense not found." });
     res.json(result.rows[0]);

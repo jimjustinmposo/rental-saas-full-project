@@ -32,6 +32,9 @@ router.get("/", async (req, res) => {
 });
 
 // POST /api/payments
+// Monthly rental rule: a tenant can only have ONE payment record per month.
+// If one already exists for this tenant + month, we update it instead of
+// creating a duplicate (this also keeps the dashboard checklist accurate).
 router.post("/", async (req, res) => {
   const { tenant_id, unit_id, apartment_id, month, amount_due, amount_paid, payment_date } =
     req.body;
@@ -44,6 +47,24 @@ router.post("/", async (req, res) => {
   const status = computeStatus(due, paid);
 
   try {
+    const existing = await pool.query(
+      "SELECT id FROM payments WHERE owner_id = $1 AND tenant_id = $2 AND month = $3",
+      [req.ownerId, tenant_id, month]
+    );
+
+    if (existing.rows[0]) {
+      const updated = await pool.query(
+        `UPDATE payments SET
+           unit_id = COALESCE($1, unit_id),
+           apartment_id = COALESCE($2, apartment_id),
+           amount_due = $3, amount_paid = $4, balance = $5, status = $6,
+           payment_date = COALESCE($7, payment_date)
+         WHERE id = $8 AND owner_id = $9 RETURNING *`,
+        [unit_id || null, apartment_id || null, due, paid, balance, status, payment_date || null, existing.rows[0].id, req.ownerId]
+      );
+      return res.status(200).json(updated.rows[0]);
+    }
+
     const result = await pool.query(
       `INSERT INTO payments
          (owner_id, tenant_id, unit_id, apartment_id, month, amount_due, amount_paid, balance, status, payment_date)

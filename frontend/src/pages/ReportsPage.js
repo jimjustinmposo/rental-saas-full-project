@@ -1,7 +1,11 @@
 import React, { useEffect, useState } from "react";
 import apiClient from "../api/apiClient";
+import { useAuth } from "../api/AuthContext";
+import { formatMoney } from "../utils/currency";
 
 export default function ReportsPage() {
+  const { owner } = useAuth();
+  const currency = owner?.currency || "USD";
   const [apartments, setApartments] = useState([]);
   const [history, setHistory] = useState([]);
   const [apartmentId, setApartmentId] = useState("");
@@ -75,18 +79,18 @@ export default function ReportsPage() {
           <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
             <div>
               <div style={{ fontSize: 13, color: "var(--color-text-muted)" }}>Income</div>
-              <div style={{ fontSize: 22, fontWeight: 800 }}>${result.totalIncome.toLocaleString()}</div>
+              <div style={{ fontSize: 22, fontWeight: 800 }}>{formatMoney(result.totalIncome, currency)}</div>
             </div>
             <div>
               <div style={{ fontSize: 13, color: "var(--color-text-muted)" }}>Expenses</div>
               <div style={{ fontSize: 22, fontWeight: 800, color: "var(--color-danger)" }}>
-                ${result.totalExpenses.toLocaleString()}
+                {formatMoney(result.totalExpenses, currency)}
               </div>
             </div>
             <div>
               <div style={{ fontSize: 13, color: "var(--color-text-muted)" }}>Profit</div>
               <div style={{ fontSize: 22, fontWeight: 800, color: "var(--color-success)" }}>
-                ${result.profit.toLocaleString()}
+                {formatMoney(result.profit, currency)}
               </div>
             </div>
           </div>
@@ -117,9 +121,9 @@ export default function ReportsPage() {
                   <tr key={r.id}>
                     <td data-label="Month">{r.month}</td>
                     <td data-label="Apartment">{r.apartment_name || "All"}</td>
-                    <td data-label="Income">${Number(r.total_income).toLocaleString()}</td>
-                    <td data-label="Expenses">${Number(r.total_expenses).toLocaleString()}</td>
-                    <td data-label="Profit">${Number(r.profit).toLocaleString()}</td>
+                    <td data-label="Income">{formatMoney(r.total_income, currency)}</td>
+                    <td data-label="Expenses">{formatMoney(r.total_expenses, currency)}</td>
+                    <td data-label="Profit">{formatMoney(r.profit, currency)}</td>
                   </tr>
                 ))}
               </tbody>

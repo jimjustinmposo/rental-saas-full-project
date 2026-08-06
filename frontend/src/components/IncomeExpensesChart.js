@@ -9,8 +9,12 @@ import {
   Tooltip,
   CartesianGrid,
 } from "recharts";
+import { useAuth } from "../api/AuthContext";
+import { formatMoney } from "../utils/currency";
 
 export default function IncomeExpensesChart({ data }) {
+  const { owner } = useAuth();
+  const currency = owner?.currency || "USD";
   const chartData = (data && data.length ? data : []).map((d) => ({
     label: d.label,
     income: Number(d.income || 0),
@@ -31,7 +35,7 @@ export default function IncomeExpensesChart({ data }) {
               <CartesianGrid strokeDasharray="3 3" stroke="#ece9f9" vertical={false} />
               <XAxis dataKey="label" tick={{ fontSize: 12, fill: "#9b98b5" }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fontSize: 12, fill: "#9b98b5" }} axisLine={false} tickLine={false} />
-              <Tooltip />
+              <Tooltip formatter={(value) => formatMoney(value, currency)} />
               <Bar dataKey="income" fill="#5b3df0" radius={[6, 6, 0, 0]} barSize={18} />
               <Bar dataKey="expenses" fill="#d946ef" radius={[6, 6, 0, 0]} barSize={18} />
               <Line type="monotone" dataKey="income" stroke="#3f27a8" strokeWidth={2} dot={{ r: 3 }} />

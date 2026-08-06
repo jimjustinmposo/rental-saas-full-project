@@ -12,6 +12,10 @@ CREATE TABLE IF NOT EXISTS owners (
   created_at TIMESTAMP DEFAULT NOW()
 );
 
+-- Added after initial release — safe to re-run, and safe against an
+-- already-deployed owners table that predates this column.
+ALTER TABLE owners ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'USD';
+
 CREATE TABLE IF NOT EXISTS apartments (
   id SERIAL PRIMARY KEY,
   owner_id INT REFERENCES owners(id) ON DELETE CASCADE,
@@ -42,6 +46,11 @@ CREATE TABLE IF NOT EXISTS tenants (
   created_at TIMESTAMP DEFAULT NOW()
 );
 
+-- Added after initial release — safe to re-run against an already-live table.
+-- 'Active' = currently renting; 'Unassigned' = tenant has left. Manually set
+-- by the owner (not auto-derived from unit assignment).
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'Active';
+
 CREATE TABLE IF NOT EXISTS payments (
   id SERIAL PRIMARY KEY,
   owner_id INT REFERENCES owners(id) ON DELETE CASCADE,
@@ -66,6 +75,11 @@ CREATE TABLE IF NOT EXISTS expenses (
   amount NUMERIC DEFAULT 0,
   date DATE DEFAULT CURRENT_DATE
 );
+
+-- New expense structure: Apartment / Date / Amount / Description only.
+-- Category is removed per spec. Safe to re-run; existing category data
+-- for this column is intentionally dropped since it's no longer tracked.
+ALTER TABLE expenses DROP COLUMN IF EXISTS category;
 
 CREATE TABLE IF NOT EXISTS monthly_reports (
   id SERIAL PRIMARY KEY,

@@ -36,6 +36,8 @@ router.post("/upload-image", upload.single("image"), (req, res) => {
 });
 
 // GET /api/tenants
+// Active tenants always come first; Unassigned (moved-out) tenants sink
+// to the bottom automatically — no manual sort needed on the frontend.
 router.get("/", async (req, res) => {
   try {
     const result = await pool.query(
@@ -44,7 +46,7 @@ router.get("/", async (req, res) => {
        LEFT JOIN units u ON u.id = t.unit_id
        LEFT JOIN apartments a ON a.id = u.apartment_id
        WHERE t.owner_id = $1
-       ORDER BY t.created_at DESC`,
+       ORDER BY (t.status = 'Unassigned') ASC, t.created_at DESC`,
       [req.ownerId]
     );
     res.json(result.rows);
@@ -56,13 +58,22 @@ router.get("/", async (req, res) => {
 
 // POST /api/tenants
 router.post("/", async (req, res) => {
-  const { name, phone, unit_id, move_in, deposit, image_url } = req.body;
+  const { name, phone, unit_id, move_in, deposit, image_url, status } = req.body;
   if (!name) return res.status(400).json({ error: "Tenant name is required." });
   try {
     const result = await pool.query(
-      `INSERT INTO tenants (owner_id, name, phone, unit_id, move_in, deposit, image_url)
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-      [req.ownerId, name, phone || null, unit_id || null, move_in || null, deposit || 0, image_url || null]
+      `INSERT INTO tenants (owner_id, name, phone, unit_id, move_in, deposit, image_url, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+      [
+        req.ownerId,
+        name,
+        phone || null,
+        unit_id || null,
+        move_in || null,
+        deposit || 0,
+        image_url || null,
+        status === "Unassigned" ? "Unassigned" : "Active",
+      ]
     );
 
     if (unit_id) {
@@ -80,21 +91,72 @@ router.post("/", async (req, res) => {
 });
 
 // PUT /api/tenants/:id
+// When status is set to "Unassigned" (tenant moved out), we automatically
+// clear their unit assignment and flip that unit back to Vacant — unless
+// the caller explicitly passed a new unit_id in the same request.
 router.put("/:id", async (req, res) => {
-  const { name, phone, unit_id, move_in, deposit, image_url } = req.body;
+  const { name, phone, unit_id, move_in, deposit, image_url, status } = req.body;
   try {
-    const result = await pool.query(
-      `UPDATE tenants SET
-         name = COALESCE($1, name),
-         phone = COALESCE($2, phone),
-         unit_id = COALESCE($3, unit_id),
-         move_in = COALESCE($4, move_in),
-         deposit = COALESCE($5, deposit),
-         image_url = COALESCE($6, image_url)
-       WHERE id = $7 AND owner_id = $8 RETURNING *`,
-      [name, phone, unit_id, move_in, deposit, image_url, req.params.id, req.ownerId]
+    const existing = await pool.query(
+      "SELECT * FROM tenants WHERE id = $1 AND owner_id = $2",
+      [req.params.id, req.ownerId]
     );
-    if (!result.rows[0]) return res.status(404).json({ error: "Tenant not found." });
+    if (!existing.rows[0]) return res.status(404).json({ error: "Tenant not found." });
+    const previousUnitId = existing.rows[0].unit_id;
+
+    // Figure out the tenant's next unit_id: explicit value wins, otherwise
+    // "Unassigned" clears it, otherwise it stays whatever it already was.
+    let nextUnitId = previousUnitId;
+    let unitIdChanged = false;
+    if (unit_id !== undefined) {
+      nextUnitId = unit_id === "" ? null : unit_id;
+      unitIdChanged = true;
+    } else if (status === "Unassigned") {
+      nextUnitId = null;
+      unitIdChanged = true;
+    }
+
+    const fields = [];
+    const values = [];
+    let i = 1;
+    const set = (col, val) => {
+      fields.push(`${col} = $${i}`);
+      values.push(val);
+      i++;
+    };
+    if (name !== undefined) set("name", name);
+    if (phone !== undefined) set("phone", phone);
+    if (unitIdChanged) set("unit_id", nextUnitId);
+    if (move_in !== undefined) set("move_in", move_in);
+    if (deposit !== undefined) set("deposit", deposit);
+    if (image_url !== undefined) set("image_url", image_url);
+    if (status !== undefined) set("status", status);
+
+    if (fields.length === 0) {
+      return res.json(existing.rows[0]); // nothing to update
+    }
+
+    values.push(req.params.id, req.ownerId);
+    const result = await pool.query(
+      `UPDATE tenants SET ${fields.join(", ")} WHERE id = $${i} AND owner_id = $${i + 1} RETURNING *`,
+      values
+    );
+
+    // Free up the old unit if the tenant no longer occupies it.
+    if (unitIdChanged && previousUnitId && String(nextUnitId) !== String(previousUnitId)) {
+      await pool.query(
+        "UPDATE units SET status = 'Vacant' WHERE id = $1 AND owner_id = $2",
+        [previousUnitId, req.ownerId]
+      );
+    }
+    // Mark the new unit occupied if one was assigned.
+    if (unitIdChanged && nextUnitId) {
+      await pool.query(
+        "UPDATE units SET status = 'Occupied' WHERE id = $1 AND owner_id = $2",
+        [nextUnitId, req.ownerId]
+      );
+    }
+
     res.json(result.rows[0]);
   } catch (err) {
     console.error(err);

@@ -59,7 +59,7 @@ router.post("/signup", async (req, res) => {
     const result = await pool.query(
       `INSERT INTO owners (name, email, password_hash)
        VALUES ($1, $2, $3)
-       RETURNING id, name, email, created_at`,
+       RETURNING id, name, email, currency, created_at`,
       [name.trim(), email.toLowerCase().trim(), passwordHash]
     );
 
@@ -109,7 +109,7 @@ router.post("/login", async (req, res) => {
 
     res.json({
       token,
-      owner: { id: owner.id, name: owner.name, email: owner.email },
+      owner: { id: owner.id, name: owner.name, email: owner.email, currency: owner.currency },
     });
   } catch (err) {
     console.error(err);
@@ -123,11 +123,37 @@ router.post("/login", async (req, res) => {
 const { requireAuth } = require("../middleware/auth");
 router.get("/me", requireAuth, async (req, res) => {
   const result = await pool.query(
-    "SELECT id, name, email, created_at FROM owners WHERE id = $1",
+    "SELECT id, name, email, currency, created_at FROM owners WHERE id = $1",
     [req.ownerId]
   );
   if (!result.rows[0]) return res.status(404).json({ error: "Owner not found." });
   res.json(result.rows[0]);
+});
+
+// ------------------------------------------------------------------
+// PUT /api/auth/currency — owner picks the currency their whole
+// dashboard displays amounts in (e.g. USD, AED, EUR, PHP…).
+// ------------------------------------------------------------------
+const ALLOWED_CURRENCIES = [
+  "USD", "EUR", "GBP", "AED", "SAR", "PHP", "INR", "CAD",
+  "AUD", "SGD", "JPY", "CNY", "ZAR", "NGN", "KES",
+];
+router.put("/currency", requireAuth, async (req, res) => {
+  const { currency } = req.body;
+  if (!currency || !ALLOWED_CURRENCIES.includes(currency)) {
+    return res.status(400).json({ error: "Unsupported currency code." });
+  }
+  try {
+    const result = await pool.query(
+      `UPDATE owners SET currency = $1 WHERE id = $2
+       RETURNING id, name, email, currency`,
+      [currency, req.ownerId]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to update currency." });
+  }
 });
 
 module.exports = router;

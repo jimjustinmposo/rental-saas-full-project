@@ -1,8 +1,12 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
+import { useAuth } from "../api/AuthContext";
+import { formatMoney } from "../utils/currency";
 
 export default function LatestExpensesTable({ expenses }) {
   const navigate = useNavigate();
+  const { owner } = useAuth();
+  const currency = owner?.currency || "USD";
 
   return (
     <div className="card">
@@ -32,13 +36,13 @@ export default function LatestExpensesTable({ expenses }) {
               onMouseLeave={(ev) => (ev.currentTarget.style.background = "transparent")}
             >
               <div>
-                <div style={{ fontWeight: 700, fontSize: 14 }}>{e.category}</div>
+                <div style={{ fontWeight: 700, fontSize: 14 }}>{e.description || "Expense"}</div>
                 <div style={{ fontSize: 12.5, color: "var(--color-text-muted)" }}>
                   {e.apartment_name || "General"}
                 </div>
               </div>
               <div style={{ fontWeight: 700, color: "var(--color-danger)" }}>
-                ${Number(e.amount).toLocaleString()}
+                {formatMoney(e.amount, currency)}
               </div>
             </div>
           ))}

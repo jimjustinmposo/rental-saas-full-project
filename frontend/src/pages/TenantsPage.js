@@ -1,13 +1,19 @@
 import React, { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import apiClient from "../api/apiClient";
+import { useAuth } from "../api/AuthContext";
+
+const emptyForm = { name: "", phone: "", unit_id: "", move_in: "", deposit: "", status: "Active" };
 
 export default function TenantsPage() {
   const navigate = useNavigate();
+  const { owner } = useAuth();
+  const currency = owner?.currency || "USD";
   const [tenants, setTenants] = useState([]);
   const [units, setUnits] = useState([]);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ name: "", phone: "", unit_id: "", move_in: "", deposit: "" });
+  const [editingId, setEditingId] = useState(null);
+  const [form, setForm] = useState(emptyForm);
   const [imageFile, setImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
   const [uploading, setUploading] = useState(false);
@@ -23,6 +29,14 @@ export default function TenantsPage() {
 
   useEffect(load, []);
 
+  const resetForm = () => {
+    setForm(emptyForm);
+    setImageFile(null);
+    setImagePreview(null);
+    setEditingId(null);
+    setShowForm(false);
+  };
+
   const handleImageChange = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -34,7 +48,7 @@ export default function TenantsPage() {
     e.preventDefault();
     setUploading(true);
     try {
-      let image_url = null;
+      let image_url;
       if (imageFile) {
         const data = new FormData();
         data.append("image", imageFile);
@@ -43,19 +57,37 @@ export default function TenantsPage() {
         });
         image_url = uploadRes.data.image_url;
       }
-      await apiClient.post("/tenants", { ...form, image_url });
-      setForm({ name: "", phone: "", unit_id: "", move_in: "", deposit: "" });
-      setImageFile(null);
-      setImagePreview(null);
-      setShowForm(false);
+      const payload = { ...form, unit_id: form.unit_id || "" };
+      if (image_url) payload.image_url = image_url;
+
+      if (editingId) {
+        await apiClient.put(`/tenants/${editingId}`, payload);
+      } else {
+        await apiClient.post("/tenants", payload);
+      }
+      resetForm();
       load();
     } finally {
       setUploading(false);
     }
   };
 
+  const handleEditClick = (t) => {
+    setEditingId(t.id);
+    setForm({
+      name: t.name || "",
+      phone: t.phone || "",
+      unit_id: t.unit_id || "",
+      move_in: t.move_in ? t.move_in.slice(0, 10) : "",
+      deposit: t.deposit || "",
+      status: t.status || "Active",
+    });
+    setShowForm(true);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
   const handleDelete = async (id) => {
-    if (!window.confirm("Remove this tenant?")) return;
+    if (!window.confirm("Permanently delete this tenant record? Consider setting status to Unassigned instead if they just moved out.")) return;
     await apiClient.delete(`/tenants/${id}`);
     load();
   };
@@ -76,7 +108,10 @@ export default function TenantsPage() {
     <div>
       <div className="page-header">
         <h1>Tenants</h1>
-        <button className="btn btn-primary" onClick={() => setShowForm((s) => !s)}>
+        <button
+          className="btn btn-primary"
+          onClick={() => (showForm ? resetForm() : setShowForm(true))}
+        >
           {showForm ? "Cancel" : "+ Add Tenant"}
         </button>
       </div>
@@ -89,7 +124,11 @@ export default function TenantsPage() {
                 width: 72,
                 height: 72,
                 borderRadius: "50%",
-                background: imagePreview ? `url(${imagePreview}) center/cover` : "var(--color-primary-light)",
+                background: imagePreview
+                  ? `url(${imagePreview}) center/cover`
+                  : editingId && form.image_url
+                  ? `url(${form.image_url}) center/cover`
+                  : "var(--color-primary-light)",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
@@ -100,7 +139,7 @@ export default function TenantsPage() {
               {!imagePreview && "👤"}
             </div>
             <div>
-              <label className="field-label">Tenant photo</label>
+              <label className="field-label">Tenant photo {editingId && "(leave blank to keep current)"}</label>
               <input type="file" accept="image/*" onChange={handleImageChange} />
             </div>
           </div>
@@ -130,7 +169,7 @@ export default function TenantsPage() {
                 value={form.unit_id}
                 onChange={(e) => setForm({ ...form, unit_id: e.target.value })}
               >
-                <option value="">Unassigned</option>
+                <option value="">Unassigned (no unit)</option>
                 {units.map((u) => (
                   <option key={u.id} value={u.id}>
                     {u.apartment_name} — {u.unit_number}
@@ -148,7 +187,7 @@ export default function TenantsPage() {
               />
             </div>
             <div>
-              <label className="field-label">Deposit ($)</label>
+              <label className="field-label">Deposit ({currency})</label>
               <input
                 type="number"
                 className="input-field"
@@ -156,9 +195,25 @@ export default function TenantsPage() {
                 onChange={(e) => setForm({ ...form, deposit: e.target.value })}
               />
             </div>
+            <div>
+              <label className="field-label">Status</label>
+              <select
+                className="input-field"
+                value={form.status}
+                onChange={(e) => setForm({ ...form, status: e.target.value })}
+              >
+                <option value="Active">Active</option>
+                <option value="Unassigned">Unassigned (moved out)</option>
+              </select>
+            </div>
           </div>
+          {editingId && form.status === "Unassigned" && (
+            <div style={{ fontSize: 12.5, color: "var(--color-text-muted)", marginTop: 8 }}>
+              Setting status to Unassigned will clear their unit and free it up, unless you also pick a new unit above.
+            </div>
+          )}
           <button type="submit" className="btn btn-primary" style={{ marginTop: 16 }} disabled={uploading}>
-            {uploading ? "Saving…" : "Save Tenant"}
+            {uploading ? "Saving…" : editingId ? "Save Changes" : "Save Tenant"}
           </button>
         </form>
       )}
@@ -184,10 +239,22 @@ export default function TenantsPage() {
             <div
               className="card clickable-card"
               key={t.id}
-              style={{ textAlign: "center" }}
+              style={{ textAlign: "center", position: "relative" }}
               onClick={() => navigate(`/payments?tenant=${encodeURIComponent(t.name)}`)}
               title="View this tenant's payment history"
             >
+              <div
+                style={{
+                  position: "absolute",
+                  top: 14,
+                  right: 14,
+                  width: 10,
+                  height: 10,
+                  borderRadius: "50%",
+                  background: t.status === "Unassigned" ? "var(--color-danger)" : "var(--color-success)",
+                }}
+                title={t.status === "Unassigned" ? "Unassigned" : "Active"}
+              />
               <div
                 style={{
                   width: 64,
@@ -210,16 +277,34 @@ export default function TenantsPage() {
                 {t.apartment_name ? `${t.apartment_name} · ${t.unit_number}` : "No unit assigned"}
               </div>
               <div style={{ fontSize: 12.5, color: "var(--color-text-faint)", marginTop: 2 }}>{t.phone}</div>
-              <button
-                className="btn btn-danger"
-                style={{ marginTop: 12, padding: "6px 14px" }}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleDelete(t.id);
-                }}
+              <span
+                className={`pill ${t.status === "Unassigned" ? "pill-danger" : "pill-success"}`}
+                style={{ marginTop: 8, display: "inline-block" }}
               >
-                Remove
-              </button>
+                {t.status === "Unassigned" ? "Unassigned" : "Active"}
+              </span>
+              <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 12 }}>
+                <button
+                  className="btn btn-secondary"
+                  style={{ padding: "6px 14px" }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleEditClick(t);
+                  }}
+                >
+                  Edit
+                </button>
+                <button
+                  className="btn btn-danger"
+                  style={{ padding: "6px 14px" }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDelete(t.id);
+                  }}
+                >
+                  Remove
+                </button>
+              </div>
             </div>
           ))}
         </div>

@@ -152,7 +152,7 @@ export default function PaymentsPage() {
               />
             </div>
             <div>
-              <label className="field-label">Month (e.g. 2026-08)</label>
+              <label className="field-label">Month (e.g. 2026.Jan)</label>
               <input
                 className="input-field"
                 value={form.month}

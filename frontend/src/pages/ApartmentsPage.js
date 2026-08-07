@@ -2,11 +2,14 @@ import React, { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import apiClient from "../api/apiClient";
 
+const emptyForm = { name: "", address: "", payment_note: "" };
+
 export default function ApartmentsPage() {
   const navigate = useNavigate();
   const [apartments, setApartments] = useState([]);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ name: "", address: "" });
+  const [editingId, setEditingId] = useState(null);
+  const [form, setForm] = useState(emptyForm);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
 
@@ -16,12 +19,32 @@ export default function ApartmentsPage() {
 
   useEffect(load, []);
 
+  const resetForm = () => {
+    setForm(emptyForm);
+    setEditingId(null);
+    setShowForm(false);
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
-    await apiClient.post("/apartments", form);
-    setForm({ name: "", address: "" });
-    setShowForm(false);
+    if (editingId) {
+      await apiClient.put(`/apartments/${editingId}`, form);
+    } else {
+      await apiClient.post("/apartments", form);
+    }
+    resetForm();
     load();
+  };
+
+  const handleEditClick = (apt) => {
+    setEditingId(apt.id);
+    setForm({
+      name: apt.name || "",
+      address: apt.address || "",
+      payment_note: apt.payment_note || "",
+    });
+    setShowForm(true);
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const handleDelete = async (id) => {
@@ -34,7 +57,10 @@ export default function ApartmentsPage() {
     if (!search.trim()) return apartments;
     const q = search.toLowerCase();
     return apartments.filter(
-      (a) => a.name?.toLowerCase().includes(q) || a.address?.toLowerCase().includes(q)
+      (a) =>
+        a.name?.toLowerCase().includes(q) ||
+        a.address?.toLowerCase().includes(q) ||
+        a.payment_note?.toLowerCase().includes(q)
     );
   }, [apartments, search]);
 
@@ -42,7 +68,10 @@ export default function ApartmentsPage() {
     <div>
       <div className="page-header">
         <h1>Apartments</h1>
-        <button className="btn btn-primary" onClick={() => setShowForm((s) => !s)}>
+        <button
+          className="btn btn-primary"
+          onClick={() => (showForm ? resetForm() : setShowForm(true))}
+        >
           {showForm ? "Cancel" : "+ Add Apartment"}
         </button>
       </div>
@@ -67,9 +96,20 @@ export default function ApartmentsPage() {
                 onChange={(e) => setForm({ ...form, address: e.target.value })}
               />
             </div>
+            <div style={{ gridColumn: "1 / -1" }}>
+              <label className="field-label">Payment note</label>
+              <textarea
+                className="input-field"
+                rows={4}
+                value={form.payment_note}
+                onChange={(e) => setForm({ ...form, payment_note: e.target.value })}
+                placeholder={"1st payment 15000\n2nd payment 12000\n3rd payment 15000\n4th payment 15000"}
+                style={{ resize: "vertical" }}
+              />
+            </div>
           </div>
           <button type="submit" className="btn btn-primary" style={{ marginTop: 16 }}>
-            Save Apartment
+            {editingId ? "Save Changes" : "Save Apartment"}
           </button>
         </form>
       )}
@@ -77,7 +117,7 @@ export default function ApartmentsPage() {
       <div className="search-bar">
         <span>🔍</span>
         <input
-          placeholder="Search by name or address…"
+          placeholder="Search by name, address, or payment note…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
@@ -98,24 +138,48 @@ export default function ApartmentsPage() {
               onClick={() => navigate(`/units?apartment=${encodeURIComponent(apt.name)}`)}
               title="View units for this apartment"
             >
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
                 <div>
                   <div style={{ fontWeight: 800, fontSize: 16 }}>{apt.name}</div>
                   <div style={{ fontSize: 13, color: "var(--color-text-muted)", marginTop: 2 }}>
                     {apt.address || "No address set"}
                   </div>
                 </div>
-                <button
-                  className="btn btn-danger"
-                  style={{ padding: "6px 10px" }}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleDelete(apt.id);
-                  }}
-                >
-                  Delete
-                </button>
+                <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                  <button
+                    className="btn btn-secondary"
+                    style={{ padding: "6px 10px" }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleEditClick(apt);
+                    }}
+                  >
+                    Edit
+                  </button>
+                  <button
+                    className="btn btn-danger"
+                    style={{ padding: "6px 10px" }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDelete(apt.id);
+                    }}
+                  >
+                    Delete
+                  </button>
+                </div>
               </div>
+
+              {apt.payment_note && (
+                <div style={{ marginTop: 12 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "var(--color-text-faint)", textTransform: "uppercase", letterSpacing: "0.03em" }}>
+                    Payment note
+                  </div>
+                  <div style={{ fontSize: 13.5, color: "var(--color-text)", whiteSpace: "pre-line", marginTop: 4 }}>
+                    {apt.payment_note}
+                  </div>
+                </div>
+              )}
+
               <div style={{ marginTop: 14, display: "flex", gap: 8 }}>
                 <span className="pill pill-success">{apt.occupied_units || 0} occupied</span>
                 <span className="pill" style={{ background: "var(--color-primary-light)", color: "var(--color-primary-dark)" }}>

@@ -43,13 +43,13 @@ router.get("/:id", async (req, res) => {
 
 // POST /api/apartments
 router.post("/", async (req, res) => {
-  const { name, address } = req.body;
+  const { name, address, payment_note } = req.body;
   if (!name) return res.status(400).json({ error: "Apartment name is required." });
   try {
     const result = await pool.query(
-      `INSERT INTO apartments (owner_id, name, address)
-       VALUES ($1, $2, $3) RETURNING *`,
-      [req.ownerId, name, address || null]
+      `INSERT INTO apartments (owner_id, name, address, payment_note)
+       VALUES ($1, $2, $3, $4) RETURNING *`,
+      [req.ownerId, name, address || null, payment_note || null]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -60,12 +60,13 @@ router.post("/", async (req, res) => {
 
 // PUT /api/apartments/:id
 router.put("/:id", async (req, res) => {
-  const { name, address } = req.body;
+  const { name, address, payment_note } = req.body;
   try {
     const result = await pool.query(
-      `UPDATE apartments SET name = COALESCE($1, name), address = COALESCE($2, address)
-       WHERE id = $3 AND owner_id = $4 RETURNING *`,
-      [name, address, req.params.id, req.ownerId]
+      `UPDATE apartments SET name = COALESCE($1, name), address = COALESCE($2, address),
+         payment_note = COALESCE($3, payment_note)
+       WHERE id = $4 AND owner_id = $5 RETURNING *`,
+      [name, address, payment_note, req.params.id, req.ownerId]
     );
     if (!result.rows[0]) return res.status(404).json({ error: "Apartment not found." });
     res.json(result.rows[0]);

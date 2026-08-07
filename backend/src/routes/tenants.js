@@ -28,6 +28,20 @@ const upload = multer({
   },
 });
 
+// Recomputes a unit's Occupied/Vacant status from whether any Active
+// tenant actually references it — the single source of truth, rather than
+// something toggled by hand in multiple places and prone to drifting.
+async function recomputeUnitStatus(unitId, ownerId) {
+  if (!unitId) return;
+  await pool.query(
+    `UPDATE units SET status = CASE
+       WHEN EXISTS (SELECT 1 FROM tenants WHERE tenants.unit_id = units.id AND tenants.status = 'Active')
+       THEN 'Occupied' ELSE 'Vacant' END
+     WHERE id = $1 AND owner_id = $2`,
+    [unitId, ownerId]
+  );
+}
+
 // POST /api/tenants/upload-image — returns a URL to use as image_url
 router.post("/upload-image", upload.single("image"), (req, res) => {
   if (!req.file) return res.status(400).json({ error: "No image uploaded." });
@@ -56,39 +70,41 @@ router.get("/", async (req, res) => {
   }
 });
 
+// ---------------------------------------------------------------------
+// Status rule (the single source of truth, enforced on every write):
+//   move_out empty  -> status = 'Active'
+//   move_out filled -> status = 'Unassigned', and unit_id is cleared
+// A client-supplied `status` value is never trusted directly — it's
+// always re-derived from move_out so the two can never conflict.
+// ---------------------------------------------------------------------
+
 // POST /api/tenants
 router.post("/", async (req, res) => {
-  const { name, phone, unit_id, move_in, move_out, deposit, image_url, status } = req.body;
+  const { name, phone, unit_id, move_in, move_out, deposit, image_url } = req.body;
   if (!name) return res.status(400).json({ error: "Tenant name is required." });
+
+  const hasMoveOut = !!move_out;
+  const status = hasMoveOut ? "Unassigned" : "Active";
+  const finalUnitId = hasMoveOut ? null : unit_id || null;
+
   try {
     const result = await pool.query(
       `INSERT INTO tenants (owner_id, name, phone, unit_id, move_in, move_out, deposit, image_url, status)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
-      [
-        req.ownerId,
-        name,
-        phone || null,
-        unit_id || null,
-        move_in || null,
-        move_out || null,
-        deposit || 0,
-        image_url || null,
-        status === "Unassigned" ? "Unassigned" : "Active",
-      ]
+      [req.ownerId, name, phone || null, finalUnitId, move_in || null, move_out || null, deposit || 0, image_url || null, status]
     );
 
-    if (unit_id) {
+    if (finalUnitId) {
       // Rule: one active tenant per unit — moving a new tenant in
-      // automatically moves the previous occupant out.
+      // automatically moves the previous occupant out, with a real
+      // move-out date recorded.
       await pool.query(
-        `UPDATE tenants SET status = 'Unassigned', unit_id = NULL
+        `UPDATE tenants SET status = 'Unassigned', unit_id = NULL,
+           move_out = COALESCE(move_out, CURRENT_DATE)
          WHERE unit_id = $1 AND owner_id = $2 AND status = 'Active' AND id <> $3`,
-        [unit_id, req.ownerId, result.rows[0].id]
+        [finalUnitId, req.ownerId, result.rows[0].id]
       );
-      await pool.query(
-        "UPDATE units SET status = 'Occupied' WHERE id = $1 AND owner_id = $2",
-        [unit_id, req.ownerId]
-      );
+      await recomputeUnitStatus(finalUnitId, req.ownerId);
     }
 
     res.status(201).json(result.rows[0]);
@@ -99,38 +115,27 @@ router.post("/", async (req, res) => {
 });
 
 // PUT /api/tenants/:id
-// When status is set to "Unassigned" (tenant moved out), we automatically
-// clear their unit assignment and flip that unit back to Vacant — unless
-// the caller explicitly passed a new unit_id in the same request.
 router.put("/:id", async (req, res) => {
-  const { name, phone, unit_id, move_in, move_out, deposit, image_url, status } = req.body;
+  const { name, phone, unit_id, move_in, move_out, deposit, image_url } = req.body;
   try {
     const existing = await pool.query(
       "SELECT * FROM tenants WHERE id = $1 AND owner_id = $2",
       [req.params.id, req.ownerId]
     );
     if (!existing.rows[0]) return res.status(404).json({ error: "Tenant not found." });
-    const previousUnitId = existing.rows[0].unit_id;
+    const before = existing.rows[0];
+    const previousUnitId = before.unit_id;
 
-    // Figure out the tenant's next unit_id: explicit value wins, otherwise
-    // "Unassigned" clears it, otherwise it stays whatever it already was.
-    let nextUnitId = previousUnitId;
-    let unitIdChanged = false;
-    if (unit_id !== undefined) {
-      nextUnitId = unit_id === "" ? null : unit_id;
-      unitIdChanged = true;
-    } else if (status === "Unassigned") {
-      nextUnitId = null;
-      unitIdChanged = true;
-    }
-
-    // Keep status and unit assignment in sync when the caller only changed
-    // one of the two: clearing the unit implies the tenant moved out;
-    // assigning a unit implies they're active.
-    let resolvedStatus = status;
-    if (resolvedStatus === undefined && unitIdChanged) {
-      resolvedStatus = nextUnitId === null ? "Unassigned" : "Active";
-    }
+    // Resolve the final move_out value for this update, then derive
+    // status and unit_id from it — move_out is always the deciding field.
+    const finalMoveOut = move_out !== undefined ? (move_out || null) : before.move_out;
+    const hasMoveOut = !!finalMoveOut;
+    const finalStatus = hasMoveOut ? "Unassigned" : "Active";
+    const finalUnitId = hasMoveOut
+      ? null
+      : unit_id !== undefined
+      ? unit_id || null
+      : previousUnitId;
 
     const fields = [];
     const values = [];
@@ -142,17 +147,12 @@ router.put("/:id", async (req, res) => {
     };
     if (name !== undefined) set("name", name);
     if (phone !== undefined) set("phone", phone);
-    if (unitIdChanged) set("unit_id", nextUnitId);
+    set("unit_id", finalUnitId);
     if (move_in !== undefined) set("move_in", move_in);
-    if (move_out !== undefined) set("move_out", move_out);
+    set("move_out", finalMoveOut);
     if (deposit !== undefined) set("deposit", deposit);
     if (image_url !== undefined) set("image_url", image_url);
-    if (status !== undefined) set("status", status);
-    else if (resolvedStatus !== undefined) set("status", resolvedStatus);
-
-    if (fields.length === 0) {
-      return res.json(existing.rows[0]); // nothing to update
-    }
+    set("status", finalStatus);
 
     values.push(req.params.id, req.ownerId);
     const result = await pool.query(
@@ -160,27 +160,21 @@ router.put("/:id", async (req, res) => {
       values
     );
 
-    // Free up the old unit if the tenant no longer occupies it.
-    if (unitIdChanged && previousUnitId && String(nextUnitId) !== String(previousUnitId)) {
+    // If this tenant is newly occupying a unit, bump out whoever else was
+    // active there (one active tenant per unit), with a real move-out date.
+    if (finalUnitId && String(finalUnitId) !== String(previousUnitId)) {
       await pool.query(
-        "UPDATE units SET status = 'Vacant' WHERE id = $1 AND owner_id = $2",
-        [previousUnitId, req.ownerId]
-      );
-    }
-    // Mark the new unit occupied if one was assigned.
-    if (unitIdChanged && nextUnitId) {
-      // Rule: one active tenant per unit — assigning this tenant here
-      // automatically moves out whoever else was active in that unit.
-      await pool.query(
-        `UPDATE tenants SET status = 'Unassigned', unit_id = NULL
+        `UPDATE tenants SET status = 'Unassigned', unit_id = NULL,
+           move_out = COALESCE(move_out, CURRENT_DATE)
          WHERE unit_id = $1 AND owner_id = $2 AND status = 'Active' AND id <> $3`,
-        [nextUnitId, req.ownerId, req.params.id]
-      );
-      await pool.query(
-        "UPDATE units SET status = 'Occupied' WHERE id = $1 AND owner_id = $2",
-        [nextUnitId, req.ownerId]
+        [finalUnitId, req.ownerId, req.params.id]
       );
     }
+
+    // Recompute both the old and new unit's occupancy — single source of
+    // truth, always derived from actual tenant rows rather than toggled.
+    if (previousUnitId) await recomputeUnitStatus(previousUnitId, req.ownerId);
+    if (finalUnitId) await recomputeUnitStatus(finalUnitId, req.ownerId);
 
     res.json(result.rows[0]);
   } catch (err) {
@@ -192,11 +186,18 @@ router.put("/:id", async (req, res) => {
 // DELETE /api/tenants/:id
 router.delete("/:id", async (req, res) => {
   try {
+    const existing = await pool.query(
+      "SELECT unit_id FROM tenants WHERE id = $1 AND owner_id = $2",
+      [req.params.id, req.ownerId]
+    );
     const result = await pool.query(
       "DELETE FROM tenants WHERE id = $1 AND owner_id = $2 RETURNING id",
       [req.params.id, req.ownerId]
     );
     if (!result.rows[0]) return res.status(404).json({ error: "Tenant not found." });
+    if (existing.rows[0]?.unit_id) {
+      await recomputeUnitStatus(existing.rows[0].unit_id, req.ownerId);
+    }
     res.json({ success: true });
   } catch (err) {
     console.error(err);

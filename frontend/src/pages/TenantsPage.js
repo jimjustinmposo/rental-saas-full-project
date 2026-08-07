@@ -4,7 +4,7 @@ import apiClient from "../api/apiClient";
 import { useAuth } from "../api/AuthContext";
 import SearchableSelect from "../components/SearchableSelect";
 
-const emptyForm = { name: "", phone: "", unit_id: "", move_in: "", move_out: "", deposit: "", status: "Active" };
+const emptyForm = { name: "", phone: "", unit_id: "", move_in: "", move_out: "", deposit: "" };
 
 export default function TenantsPage() {
   const navigate = useNavigate();
@@ -82,7 +82,6 @@ export default function TenantsPage() {
       move_in: t.move_in ? t.move_in.slice(0, 10) : "",
       move_out: t.move_out ? t.move_out.slice(0, 10) : "",
       deposit: t.deposit || "",
-      status: t.status || "Active",
     });
     setShowForm(true);
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -168,7 +167,7 @@ export default function TenantsPage() {
               <label className="field-label">Unit</label>
               <SearchableSelect
                 options={[
-                  { value: "", label: "Unassigned (no unit)" },
+                  { value: "", label: "No unit" },
                   ...units.map((u) => ({ value: u.id, label: `${u.apartment_name} — ${u.unit_number}` })),
                 ]}
                 value={form.unit_id}
@@ -176,7 +175,7 @@ export default function TenantsPage() {
                   setForm({
                     ...form,
                     unit_id: val,
-                    status: val === "" ? "Unassigned" : "Active",
+                    move_out: val ? "" : form.move_out, // picking a unit means they're active again
                   })
                 }
                 placeholder="Search apartment or unit number…"
@@ -197,7 +196,13 @@ export default function TenantsPage() {
                 type="date"
                 className="input-field"
                 value={form.move_out}
-                onChange={(e) => setForm({ ...form, move_out: e.target.value })}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    move_out: e.target.value,
+                    unit_id: e.target.value ? "" : form.unit_id, // a move-out date always frees their unit
+                  })
+                }
               />
             </div>
             <div>
@@ -209,24 +214,10 @@ export default function TenantsPage() {
                 onChange={(e) => setForm({ ...form, deposit: e.target.value })}
               />
             </div>
-            <div>
-              <label className="field-label">Status</label>
-              <SearchableSelect
-                options={[
-                  { value: "Active", label: "Active" },
-                  { value: "Unassigned", label: "Unassigned (moved out)" },
-                ]}
-                value={form.status}
-                onChange={(val) => setForm({ ...form, status: val })}
-                placeholder="Search status…"
-              />
-            </div>
           </div>
-          {editingId && form.status === "Unassigned" && (
-            <div style={{ fontSize: 12.5, color: "var(--color-text-muted)", marginTop: 8 }}>
-              Setting status to Unassigned will clear their unit and free it up, unless you also pick a new unit above.
-            </div>
-          )}
+          <div style={{ fontSize: 12.5, color: "var(--color-text-muted)", marginTop: 8 }}>
+            Status is set automatically: no move-out date = <strong>Active</strong>, a move-out date = <strong>Unassigned</strong> (and their unit is freed).
+          </div>
           <button type="submit" className="btn btn-primary" style={{ marginTop: 16 }} disabled={uploading}>
             {uploading ? "Saving…" : editingId ? "Save Changes" : "Save Tenant"}
           </button>

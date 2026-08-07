@@ -65,7 +65,7 @@ export default function DashboardPage() {
           </div>
 
           <div className="dashboard-row-3" style={{ marginTop: 20 }}>
-            <IncomeExpensesChart data={summary?.monthlyTrend} />
+            <IncomeExpensesChart apartments={apartments} />
             <ApartmentsOverview apartments={apartments} />
             <MonthlyReportSummary summary={summary} />
           </div>

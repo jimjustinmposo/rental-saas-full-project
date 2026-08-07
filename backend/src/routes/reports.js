@@ -349,4 +349,76 @@ router.get("/pending-all", async (req, res) => {
   }
 });
 
+// GET /api/reports/trend?view=month|year|all&apartment_id=
+// Correctly aggregated Income vs Expenses data for the dashboard chart.
+// Unlike the old monthlyTrend block on /dashboard, this always sums the
+// FULL matching date range (no artificial LIMIT) and labels months with
+// their year, so totals always match the dashboard summary cards and
+// multiple years never get merged together.
+router.get("/trend", async (req, res) => {
+  const { apartment_id } = req.query;
+  const view = ["month", "year", "all"].includes(req.query.view) ? req.query.view : "month";
+
+  try {
+    const apartmentFilter = apartment_id ? " AND apartment_id = $2" : "";
+    const params = apartment_id ? [req.ownerId, apartment_id] : [req.ownerId];
+
+    if (view === "all") {
+      const result = await pool.query(
+        `SELECT
+           (SELECT COALESCE(SUM(amount_paid),0) FROM payments WHERE owner_id = $1${apartmentFilter}) AS income,
+           (SELECT COALESCE(SUM(amount),0) FROM expenses WHERE owner_id = $1${apartmentFilter}) AS expenses`,
+        params
+      );
+      return res.json({
+        view,
+        apartment_id: apartment_id || null,
+        data: [
+          {
+            label: "All Time",
+            income: Number(result.rows[0].income),
+            expenses: Number(result.rows[0].expenses),
+          },
+        ],
+      });
+    }
+
+    const truncUnit = view === "year" ? "year" : "month";
+    const labelFormat = view === "year" ? "YYYY" : "YYYY-MM";
+
+    const result = await pool.query(
+      `SELECT to_char(bucket, '${labelFormat}') AS label,
+              COALESCE(income, 0) AS income,
+              COALESCE(expenses, 0) AS expenses
+       FROM (
+         SELECT date_trunc('${truncUnit}', payment_date) AS bucket, SUM(amount_paid) AS income
+         FROM payments
+         WHERE owner_id = $1${apartmentFilter} AND payment_date IS NOT NULL
+         GROUP BY 1
+       ) i
+       FULL OUTER JOIN (
+         SELECT date_trunc('${truncUnit}', date) AS bucket, SUM(amount) AS expenses
+         FROM expenses
+         WHERE owner_id = $1${apartmentFilter} AND date IS NOT NULL
+         GROUP BY 1
+       ) e USING (bucket)
+       ORDER BY bucket ASC`,
+      params
+    );
+
+    res.json({
+      view,
+      apartment_id: apartment_id || null,
+      data: result.rows.map((r) => ({
+        label: r.label,
+        income: Number(r.income),
+        expenses: Number(r.expenses),
+      })),
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to build income vs expenses trend." });
+  }
+});
+
 module.exports = router;

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   ResponsiveContainer,
   ComposedChart,
@@ -9,8 +9,10 @@ import {
   Tooltip,
   CartesianGrid,
 } from "recharts";
+import apiClient from "../api/apiClient";
 import { useAuth } from "../api/AuthContext";
 import { formatMoney } from "../utils/currency";
+import { formatMonthLabel } from "../utils/month";
 
 const VIEW_OPTIONS = [
   { value: "month", label: "Monthly" },
@@ -18,54 +20,41 @@ const VIEW_OPTIONS = [
   { value: "all", label: "Overall" },
 ];
 
-// Pulls a 4-digit year out of a trend point's label (e.g. "2026.Jan",
-// "2026-01") so we can group by year without needing a separate API call.
-function extractYear(point) {
-  if (point.year) return String(point.year);
-  const match = String(point.label || "").match(/\d{4}/);
-  return match ? match[0] : "Unknown";
-}
-
-function buildChartData(data, view) {
-  const source = data && data.length ? data : [];
-
-  if (view === "month") {
-    return source.map((d) => ({
-      label: d.label,
-      income: Number(d.income || 0),
-      expenses: Number(d.expenses || 0),
-    }));
-  }
-
-  if (view === "year") {
-    const byYear = {};
-    source.forEach((d) => {
-      const year = extractYear(d);
-      if (!byYear[year]) byYear[year] = { label: year, income: 0, expenses: 0 };
-      byYear[year].income += Number(d.income || 0);
-      byYear[year].expenses += Number(d.expenses || 0);
-    });
-    return Object.values(byYear).sort((a, b) => a.label.localeCompare(b.label));
-  }
-
-  // view === "all"
-  const totals = source.reduce(
-    (acc, d) => {
-      acc.income += Number(d.income || 0);
-      acc.expenses += Number(d.expenses || 0);
-      return acc;
-    },
-    { income: 0, expenses: 0 }
-  );
-  return [{ label: "All Time", ...totals }];
-}
-
-export default function IncomeExpensesChart({ data }) {
+// This component now owns its data fetching instead of relying on a
+// pre-aggregated prop. That's what makes Month/Year/Overall and the
+// per-flat filter always match the real totals: every view calls
+// /reports/trend, which sums the FULL matching date range server-side
+// (no artificial row limit, no client-side re-bucketing that can drift
+// from the real numbers).
+export default function IncomeExpensesChart({ apartments = [] }) {
   const { owner } = useAuth();
   const currency = owner?.currency || "USD";
   const [view, setView] = useState("month");
+  const [apartmentId, setApartmentId] = useState("");
+  const [chartData, setChartData] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-  const chartData = useMemo(() => buildChartData(data, view), [data, view]);
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    apiClient
+      .get("/reports/trend", { params: { view, apartment_id: apartmentId || undefined } })
+      .then((res) => {
+        if (cancelled) return;
+        const rows = (res.data.data || []).map((d) => ({
+          label: view === "month" ? formatMonthLabel(d.label) : d.label,
+          income: Number(d.income || 0),
+          expenses: Number(d.expenses || 0),
+        }));
+        setChartData(rows);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [view, apartmentId]);
 
   return (
     <div className="card">
@@ -85,8 +74,26 @@ export default function IncomeExpensesChart({ data }) {
           ))}
         </div>
       </div>
+
+      <div style={{ marginBottom: 12, maxWidth: 220 }}>
+        <select
+          className="input-field"
+          value={apartmentId}
+          onChange={(e) => setApartmentId(e.target.value)}
+        >
+          <option value="">All Flats</option>
+          {apartments.map((a) => (
+            <option key={a.id} value={a.id}>
+              {a.name}
+            </option>
+          ))}
+        </select>
+      </div>
+
       <div className="chart-container">
-        {chartData.length === 0 ? (
+        {loading ? (
+          <div className="empty-state">Loading chart…</div>
+        ) : chartData.length === 0 ? (
           <div className="empty-state">No payment or expense history yet.</div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">

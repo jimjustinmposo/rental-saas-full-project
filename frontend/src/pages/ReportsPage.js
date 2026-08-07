@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import apiClient from "../api/apiClient";
 import { useAuth } from "../api/AuthContext";
 import { formatMoney } from "../utils/currency";
-import { formatMonthLabel } from "../utils/month";
+import { formatMonthLabel, parseMonthInput, MONTH_INPUT_EXAMPLE, MONTH_INPUT_ERROR } from "../utils/month";
 import SearchableSelect from "../components/SearchableSelect";
 
 export default function ReportsPage() {
@@ -12,6 +12,7 @@ export default function ReportsPage() {
   const [history, setHistory] = useState([]);
   const [apartmentId, setApartmentId] = useState("");
   const [month, setMonth] = useState("");
+  const [monthError, setMonthError] = useState("");
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
 
@@ -26,10 +27,21 @@ export default function ReportsPage() {
 
   const handleGenerate = async (e) => {
     e.preventDefault();
+    // Month is optional here (empty = no month filter), but if the person
+    // typed something, it has to be valid YYYY.Mon.
+    let storedMonth;
+    if (month.trim()) {
+      storedMonth = parseMonthInput(month);
+      if (!storedMonth) {
+        setMonthError(MONTH_INPUT_ERROR);
+        return;
+      }
+    }
+    setMonthError("");
     setLoading(true);
     try {
       const res = await apiClient.get("/reports/monthly", {
-        params: { apartment_id: apartmentId || undefined, month: month || undefined },
+        params: { apartment_id: apartmentId || undefined, month: storedMonth },
       });
       setResult(res.data);
     } finally {
@@ -39,9 +51,10 @@ export default function ReportsPage() {
 
   const handleSave = async () => {
     if (!result) return;
+    const storedMonth = month.trim() ? parseMonthInput(month) : null;
     await apiClient.post("/reports/generate", {
       apartment_id: apartmentId || null,
-      month: month || "current",
+      month: storedMonth || "current",
       total_income: result.totalIncome,
       total_expenses: result.totalExpenses,
     });
@@ -72,8 +85,21 @@ export default function ReportsPage() {
             />
           </div>
           <div>
-            <label className="field-label">Month (e.g. 2026.Jan)</label>
-            <input className="input-field" value={month} onChange={(e) => setMonth(e.target.value)} placeholder="2026-08" />
+            <label className="field-label">Month (e.g. {MONTH_INPUT_EXAMPLE})</label>
+            <input
+              className="input-field"
+              value={month}
+              onChange={(e) => {
+                setMonth(e.target.value);
+                if (monthError) setMonthError("");
+              }}
+              placeholder={MONTH_INPUT_EXAMPLE}
+            />
+            {monthError && (
+              <div style={{ color: "var(--color-danger)", fontSize: 12.5, marginTop: 6 }}>
+                {monthError}
+              </div>
+            )}
           </div>
         </div>
         <button type="submit" className="btn btn-primary" style={{ marginTop: 16 }} disabled={loading}>

@@ -4,7 +4,7 @@ import apiClient from "../api/apiClient";
 import { useSortableData } from "../hooks/useSortableData";
 import { useAuth } from "../api/AuthContext";
 import { formatMoney } from "../utils/currency";
-import { formatMonthLabel } from "../utils/month";
+import { formatMonthLabel, parseMonthInput, MONTH_INPUT_EXAMPLE, MONTH_INPUT_ERROR } from "../utils/month";
 import SearchableSelect from "../components/SearchableSelect";
 
 const emptyForm = {
@@ -28,6 +28,7 @@ export default function PaymentsPage() {
   const [form, setForm] = useState(emptyForm);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState(searchParams.get("tenant") || "");
+  const [monthError, setMonthError] = useState("");
 
   const load = () => {
     Promise.all([apiClient.get("/payments"), apiClient.get("/tenants")]).then(([p, t]) => {
@@ -42,6 +43,7 @@ export default function PaymentsPage() {
     setForm(emptyForm);
     setEditingId(null);
     setShowForm(false);
+    setMonthError("");
   };
 
   const handleTenantSelect = (tenantId) => {
@@ -55,17 +57,24 @@ export default function PaymentsPage() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    const storedMonth = parseMonthInput(form.month);
+    if (!storedMonth) {
+      setMonthError(MONTH_INPUT_ERROR);
+      return;
+    }
+    setMonthError("");
+
     if (editingId) {
       await apiClient.put(`/payments/${editingId}`, {
         amount_due: form.amount_due,
         amount_paid: form.amount_paid,
         payment_date: form.payment_date,
-        month: form.month,
+        month: storedMonth,
       });
     } else {
       // POST upserts by tenant+month on the backend — this naturally
       // enforces "one payment per tenant per month."
-      await apiClient.post("/payments", form);
+      await apiClient.post("/payments", { ...form, month: storedMonth });
     }
     resetForm();
     load();
@@ -73,11 +82,12 @@ export default function PaymentsPage() {
 
   const handleEditClick = (p) => {
     setEditingId(p.id);
+    setMonthError("");
     setForm({
       tenant_id: p.tenant_id,
       unit_id: p.unit_id || "",
       apartment_id: p.apartment_id || "",
-      month: p.month || "",
+      month: formatMonthLabel(p.month), // show as 2026.Jan in the input
       amount_due: p.amount_due,
       amount_paid: p.amount_paid,
       payment_date: p.payment_date ? p.payment_date.slice(0, 10) : "",
@@ -152,15 +162,22 @@ export default function PaymentsPage() {
               />
             </div>
             <div>
-              <label className="field-label">Month (e.g. 2026.Jan)</label>
+              <label className="field-label">Month (e.g. {MONTH_INPUT_EXAMPLE})</label>
               <input
                 className="input-field"
                 value={form.month}
-                onChange={(e) => setForm({ ...form, month: e.target.value })}
-                placeholder="2026-08"
+                onChange={(e) => {
+                  setForm({ ...form, month: e.target.value });
+                  if (monthError) setMonthError("");
+                }}
+                placeholder={MONTH_INPUT_EXAMPLE}
                 required
-                disabled={!!editingId}
               />
+              {monthError && (
+                <div style={{ color: "var(--color-danger)", fontSize: 12.5, marginTop: 6 }}>
+                  {monthError}
+                </div>
+              )}
             </div>
             <div>
               <label className="field-label">Amount due ({currency})</label>

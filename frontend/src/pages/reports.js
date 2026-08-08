@@ -130,6 +130,7 @@ router.get("/checklist", async (req, res) => {
       [req.ownerId, month]
     );
 
+    // Group flat rows into { apartment_name: [ {tenant...}, ... ] }
     const grouped = {};
     for (const row of result.rows) {
       if (!grouped[row.apartment_id]) {
@@ -156,6 +157,9 @@ router.get("/checklist", async (req, res) => {
 
 // POST /api/reports/checklist/toggle
 // Body: { tenant_id, month, checked }
+// checked=true  -> creates/updates a Paid payment record for that month
+//                  (amount = the tenant's unit rent, date = today)
+// checked=false -> deletes the payment record for that month
 router.post("/checklist/toggle", async (req, res) => {
   const { tenant_id, month, checked } = req.body;
   if (!tenant_id || !month) {
@@ -209,6 +213,7 @@ router.post("/checklist/toggle", async (req, res) => {
 });
 
 // GET /api/reports/pending?month=YYYY-MM
+// Active tenants who have NOT paid for the given month (defaults to current).
 router.get("/pending", async (req, res) => {
   const month = req.query.month || currentMonthStr();
   try {
@@ -232,6 +237,8 @@ router.get("/pending", async (req, res) => {
 });
 
 // GET /api/reports/months?apartment_id=
+// Distinct YYYY-MM values that actually have payment or expense records,
+// for populating the searchable Month dropdown with real data only.
 router.get("/months", async (req, res) => {
   const { apartment_id } = req.query;
   try {
@@ -256,6 +263,8 @@ router.get("/months", async (req, res) => {
 });
 
 // GET /api/reports/years?apartment_id=
+// Distinct years that actually have payment or expense records, for
+// populating the searchable Year dropdown with real data only.
 router.get("/years", async (req, res) => {
   const { apartment_id } = req.query;
   try {
@@ -280,6 +289,8 @@ router.get("/years", async (req, res) => {
 });
 
 // GET /api/reports/monthly?apartment_id=&month=YYYY-MM
+// Also doubles as the "Total" report when month is omitted — it then sums
+// ALL matching records with no date filter at all.
 router.get("/monthly", async (req, res) => {
   const { apartment_id, month } = req.query;
   try {
@@ -301,6 +312,8 @@ router.get("/monthly", async (req, res) => {
       expenseQuery += ` AND apartment_id = $${expenseParams.length}`;
     }
     if (month) {
+      // expenses only have a real `date` column, not a "month" text column
+      // like payments, so match the month by formatting the date instead.
       expenseParams.push(month);
       expenseQuery += ` AND to_char(date, 'YYYY-MM') = $${expenseParams.length}`;
     }
@@ -380,7 +393,7 @@ router.post("/generate", async (req, res) => {
   }
 });
 
-// GET /api/reports/history
+// GET /api/reports/history — all saved monthly report snapshots
 router.get("/history", async (req, res) => {
   try {
     const result = await pool.query(
@@ -396,7 +409,8 @@ router.get("/history", async (req, res) => {
   }
 });
 
-// DELETE /api/reports/history
+// DELETE /api/reports/history — wipes all saved report snapshots for this
+// owner, resetting the reporting module to a clean, empty state.
 router.delete("/history", async (req, res) => {
   try {
     const result = await pool.query(
@@ -411,6 +425,8 @@ router.delete("/history", async (req, res) => {
 });
 
 // GET /api/reports/pending-all
+// ALL outstanding balances across every recorded month, not just the
+// current one — sums every Unpaid/Late payment row per tenant.
 router.get("/pending-all", async (req, res) => {
   try {
     const result = await pool.query(

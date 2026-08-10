@@ -24,6 +24,10 @@ CREATE TABLE IF NOT EXISTS apartments (
   created_at TIMESTAMP DEFAULT NOW()
 );
 
+-- Free-form long text for payment arrangement notes per apartment
+-- (e.g. installment plans). Safe to re-run against a live table.
+ALTER TABLE apartments ADD COLUMN IF NOT EXISTS payment_note TEXT;
+
 CREATE TABLE IF NOT EXISTS units (
   id SERIAL PRIMARY KEY,
   owner_id INT REFERENCES owners(id) ON DELETE CASCADE,

@@ -236,32 +236,96 @@ router.get("/pending", async (req, res) => {
   }
 });
 
+// GET /api/reports/months?apartment_id=
+// Distinct YYYY-MM values that actually have payment or expense records,
+// for populating the searchable Month dropdown with real data only.
+router.get("/months", async (req, res) => {
+  const { apartment_id } = req.query;
+  try {
+    const apartmentFilter = apartment_id ? " AND apartment_id = $2" : "";
+    const params = apartment_id ? [req.ownerId, apartment_id] : [req.ownerId];
+    const result = await pool.query(
+      `SELECT DISTINCT month FROM (
+         SELECT month FROM payments
+         WHERE owner_id = $1${apartmentFilter} AND month IS NOT NULL
+         UNION
+         SELECT to_char(date, 'YYYY-MM') AS month FROM expenses
+         WHERE owner_id = $1${apartmentFilter} AND date IS NOT NULL
+       ) all_months
+       ORDER BY month DESC`,
+      params
+    );
+    res.json({ months: result.rows.map((r) => r.month) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to load available months." });
+  }
+});
+
+// GET /api/reports/years?apartment_id=
+// Distinct years that actually have payment or expense records, for
+// populating the searchable Year dropdown with real data only.
+router.get("/years", async (req, res) => {
+  const { apartment_id } = req.query;
+  try {
+    const apartmentFilter = apartment_id ? " AND apartment_id = $2" : "";
+    const params = apartment_id ? [req.ownerId, apartment_id] : [req.ownerId];
+    const result = await pool.query(
+      `SELECT DISTINCT year FROM (
+         SELECT LEFT(month, 4) AS year FROM payments
+         WHERE owner_id = $1${apartmentFilter} AND month IS NOT NULL
+         UNION
+         SELECT to_char(date, 'YYYY') AS year FROM expenses
+         WHERE owner_id = $1${apartmentFilter} AND date IS NOT NULL
+       ) all_years
+       ORDER BY year DESC`,
+      params
+    );
+    res.json({ years: result.rows.map((r) => r.year) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to load available years." });
+  }
+});
+
 // GET /api/reports/monthly?apartment_id=&month=YYYY-MM
+// Also doubles as the "Total" report when month is omitted — it then sums
+// ALL matching records with no date filter at all.
 router.get("/monthly", async (req, res) => {
   const { apartment_id, month } = req.query;
   try {
-    const params = [req.ownerId];
+    const incomeParams = [req.ownerId];
     let incomeQuery = `SELECT COALESCE(SUM(amount_paid),0) AS income FROM payments WHERE owner_id = $1`;
-    let expenseQuery = `SELECT COALESCE(SUM(amount),0) AS expenses FROM expenses WHERE owner_id = $1`;
-
     if (apartment_id) {
-      params.push(apartment_id);
-      incomeQuery += ` AND apartment_id = $${params.length}`;
-      expenseQuery += ` AND apartment_id = $${params.length}`;
+      incomeParams.push(apartment_id);
+      incomeQuery += ` AND apartment_id = $${incomeParams.length}`;
     }
     if (month) {
-      params.push(month);
-      incomeQuery += ` AND month = $${params.length}`;
+      incomeParams.push(month);
+      incomeQuery += ` AND month = $${incomeParams.length}`;
     }
 
-    const income = await pool.query(incomeQuery, params);
-    const expenses = await pool.query(expenseQuery, apartment_id ? [req.ownerId, apartment_id] : [req.ownerId]);
+    const expenseParams = [req.ownerId];
+    let expenseQuery = `SELECT COALESCE(SUM(amount),0) AS expenses FROM expenses WHERE owner_id = $1`;
+    if (apartment_id) {
+      expenseParams.push(apartment_id);
+      expenseQuery += ` AND apartment_id = $${expenseParams.length}`;
+    }
+    if (month) {
+      // expenses only have a real `date` column, not a "month" text column
+      // like payments, so match the month by formatting the date instead.
+      expenseParams.push(month);
+      expenseQuery += ` AND to_char(date, 'YYYY-MM') = $${expenseParams.length}`;
+    }
+
+    const income = await pool.query(incomeQuery, incomeParams);
+    const expenses = await pool.query(expenseQuery, expenseParams);
 
     const totalIncome = Number(income.rows[0].income);
     const totalExpenses = Number(expenses.rows[0].expenses);
 
     res.json({
-      month: month || "current",
+      month: month || "all",
       apartment_id: apartment_id || null,
       totalIncome,
       totalExpenses,
@@ -270,6 +334,44 @@ router.get("/monthly", async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Failed to generate monthly report." });
+  }
+});
+
+// GET /api/reports/yearly?apartment_id=&year=YYYY
+router.get("/yearly", async (req, res) => {
+  const { apartment_id, year } = req.query;
+  if (!year) return res.status(400).json({ error: "year is required." });
+  try {
+    const incomeParams = [req.ownerId, year];
+    let incomeQuery = `SELECT COALESCE(SUM(amount_paid),0) AS income FROM payments WHERE owner_id = $1 AND LEFT(month, 4) = $2`;
+    if (apartment_id) {
+      incomeParams.push(apartment_id);
+      incomeQuery += ` AND apartment_id = $${incomeParams.length}`;
+    }
+
+    const expenseParams = [req.ownerId, year];
+    let expenseQuery = `SELECT COALESCE(SUM(amount),0) AS expenses FROM expenses WHERE owner_id = $1 AND to_char(date, 'YYYY') = $2`;
+    if (apartment_id) {
+      expenseParams.push(apartment_id);
+      expenseQuery += ` AND apartment_id = $${expenseParams.length}`;
+    }
+
+    const income = await pool.query(incomeQuery, incomeParams);
+    const expenses = await pool.query(expenseQuery, expenseParams);
+
+    const totalIncome = Number(income.rows[0].income);
+    const totalExpenses = Number(expenses.rows[0].expenses);
+
+    res.json({
+      year,
+      apartment_id: apartment_id || null,
+      totalIncome,
+      totalExpenses,
+      profit: totalIncome - totalExpenses,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to generate yearly report." });
   }
 });
 
@@ -346,78 +448,6 @@ router.get("/pending-all", async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Failed to load pending balances." });
-  }
-});
-
-// GET /api/reports/trend?view=month|year|all&apartment_id=
-// Correctly aggregated Income vs Expenses data for the dashboard chart.
-// Unlike the old monthlyTrend block on /dashboard, this always sums the
-// FULL matching date range (no artificial LIMIT) and labels months with
-// their year, so totals always match the dashboard summary cards and
-// multiple years never get merged together.
-router.get("/trend", async (req, res) => {
-  const { apartment_id } = req.query;
-  const view = ["month", "year", "all"].includes(req.query.view) ? req.query.view : "month";
-
-  try {
-    const apartmentFilter = apartment_id ? " AND apartment_id = $2" : "";
-    const params = apartment_id ? [req.ownerId, apartment_id] : [req.ownerId];
-
-    if (view === "all") {
-      const result = await pool.query(
-        `SELECT
-           (SELECT COALESCE(SUM(amount_paid),0) FROM payments WHERE owner_id = $1${apartmentFilter}) AS income,
-           (SELECT COALESCE(SUM(amount),0) FROM expenses WHERE owner_id = $1${apartmentFilter}) AS expenses`,
-        params
-      );
-      return res.json({
-        view,
-        apartment_id: apartment_id || null,
-        data: [
-          {
-            label: "All Time",
-            income: Number(result.rows[0].income),
-            expenses: Number(result.rows[0].expenses),
-          },
-        ],
-      });
-    }
-
-    const truncUnit = view === "year" ? "year" : "month";
-    const labelFormat = view === "year" ? "YYYY" : "YYYY-MM";
-
-    const result = await pool.query(
-      `SELECT to_char(bucket, '${labelFormat}') AS label,
-              COALESCE(income, 0) AS income,
-              COALESCE(expenses, 0) AS expenses
-       FROM (
-         SELECT date_trunc('${truncUnit}', payment_date) AS bucket, SUM(amount_paid) AS income
-         FROM payments
-         WHERE owner_id = $1${apartmentFilter} AND payment_date IS NOT NULL
-         GROUP BY 1
-       ) i
-       FULL OUTER JOIN (
-         SELECT date_trunc('${truncUnit}', date) AS bucket, SUM(amount) AS expenses
-         FROM expenses
-         WHERE owner_id = $1${apartmentFilter} AND date IS NOT NULL
-         GROUP BY 1
-       ) e USING (bucket)
-       ORDER BY bucket ASC`,
-      params
-    );
-
-    res.json({
-      view,
-      apartment_id: apartment_id || null,
-      data: result.rows.map((r) => ({
-        label: r.label,
-        income: Number(r.income),
-        expenses: Number(r.expenses),
-      })),
-    });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Failed to build income vs expenses trend." });
   }
 });
 

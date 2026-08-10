@@ -37,8 +37,13 @@ export default function SettingsPage() {
           Currency
         </div>
         <p style={{ fontSize: 13, color: "var(--color-text-muted)", marginBottom: 18 }}>
-          Choose the currency used across your dashboard — summary cards, payments,
-          expenses, rent amounts, and reports will all update to match.
+          Choose the currency used across your dashboard. Every amount stored in the system
+          is in AED — switching currency converts and displays those amounts in your chosen
+          currency, it never changes the underlying numbers.
+        </p>
+        <p style={{ fontSize: 12, color: "var(--color-text-faint)", marginBottom: 18, lineHeight: 1.5 }}>
+          ⚠️ Conversion uses fixed, approximate exchange rates — not a live feed. Good for a
+          quick sense of scale, not for anything that needs to be exact.
         </p>
 
         <form onSubmit={handleSave}>
@@ -51,7 +56,7 @@ export default function SettingsPage() {
           />
 
           <div style={{ fontSize: 13, color: "var(--color-text-muted)", marginBottom: 16 }}>
-            Preview: <strong style={{ color: "var(--color-text)" }}>{formatMoney(1250, selected)}</strong>
+            Preview: AED 1,250 → <strong style={{ color: "var(--color-text)" }}>{formatMoney(1250, selected)}</strong>
           </div>
 
           {error && (

@@ -217,7 +217,7 @@ export default function PaymentsPage() {
                 rows={3}
                 value={form.note}
                 onChange={(e) => setForm({ ...form, note: e.target.value })}
-                placeholder="e.g. Paid partial amount, will settle balance next week…"
+                placeholder="e.g. saan nag bayad if BDO, GCASH, Resibo. or pag ka may pending payment etc…"
                 style={{ resize: "vertical" }}
               />
             </div>

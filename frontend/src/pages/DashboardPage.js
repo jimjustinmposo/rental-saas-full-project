@@ -2,7 +2,6 @@ import React, { useEffect, useState } from "react";
 import apiClient from "../api/apiClient";
 import SummaryCards from "../components/SummaryCards";
 import ApartmentsOverview from "../components/ApartmentsOverview";
-import IncomeExpensesChart from "../components/IncomeExpensesChart";
 import RecentPaymentsTable from "../components/RecentPaymentsTable";
 import LatestExpensesTable from "../components/LatestExpensesTable";
 import MonthlyReportSummary from "../components/MonthlyReportSummary";
@@ -64,8 +63,7 @@ export default function DashboardPage() {
             <PaymentChecklist />
           </div>
 
-          <div className="dashboard-row-3" style={{ marginTop: 20 }}>
-            <IncomeExpensesChart apartments={apartments} />
+          <div className="dashboard-row-3" style={{ marginTop: 20, gridTemplateColumns: "1fr 1fr" }}>
             <ApartmentsOverview apartments={apartments} />
             <MonthlyReportSummary summary={summary} />
           </div>

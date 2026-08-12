@@ -43,7 +43,7 @@ router.get("/", async (req, res) => {
 // If one already exists for this tenant + month, we update it instead of
 // creating a duplicate (this also keeps the dashboard checklist accurate).
 router.post("/", async (req, res) => {
-  const { tenant_id, unit_id, apartment_id, month, amount_due, amount_paid, payment_date } =
+  const { tenant_id, unit_id, apartment_id, month, amount_due, amount_paid, payment_date, note } =
     req.body;
   if (!tenant_id || !month) {
     return res.status(400).json({ error: "tenant_id and month are required." });
@@ -65,18 +65,19 @@ router.post("/", async (req, res) => {
            unit_id = COALESCE($1, unit_id),
            apartment_id = COALESCE($2, apartment_id),
            amount_due = $3, amount_paid = $4, balance = $5, status = $6,
-           payment_date = COALESCE($7, payment_date)
-         WHERE id = $8 AND owner_id = $9 RETURNING *`,
-        [unit_id || null, apartment_id || null, due, paid, balance, status, payment_date || null, existing.rows[0].id, req.ownerId]
+           payment_date = COALESCE($7, payment_date),
+           note = COALESCE($8, note)
+         WHERE id = $9 AND owner_id = $10 RETURNING *`,
+        [unit_id || null, apartment_id || null, due, paid, balance, status, payment_date || null, note ?? null, existing.rows[0].id, req.ownerId]
       );
       return res.status(200).json(updated.rows[0]);
     }
 
     const result = await pool.query(
       `INSERT INTO payments
-         (owner_id, tenant_id, unit_id, apartment_id, month, amount_due, amount_paid, balance, status, payment_date)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
-      [req.ownerId, tenant_id, unit_id || null, apartment_id || null, month, due, paid, balance, status, payment_date || null]
+         (owner_id, tenant_id, unit_id, apartment_id, month, amount_due, amount_paid, balance, status, payment_date, note)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+      [req.ownerId, tenant_id, unit_id || null, apartment_id || null, month, due, paid, balance, status, payment_date || null, note || null]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -87,7 +88,7 @@ router.post("/", async (req, res) => {
 
 // PUT /api/payments/:id
 router.put("/:id", async (req, res) => {
-  const { amount_due, amount_paid, payment_date, month } = req.body;
+  const { amount_due, amount_paid, payment_date, month, note } = req.body;
   try {
     const existing = await pool.query(
       "SELECT * FROM payments WHERE id = $1 AND owner_id = $2",
@@ -103,9 +104,10 @@ router.put("/:id", async (req, res) => {
     const result = await pool.query(
       `UPDATE payments SET
          amount_due = $1, amount_paid = $2, balance = $3, status = $4,
-         payment_date = COALESCE($5, payment_date), month = COALESCE($6, month)
-       WHERE id = $7 AND owner_id = $8 RETURNING *`,
-      [due, paid, balance, status, payment_date, month, req.params.id, req.ownerId]
+         payment_date = COALESCE($5, payment_date), month = COALESCE($6, month),
+         note = COALESCE($7, note)
+       WHERE id = $8 AND owner_id = $9 RETURNING *`,
+      [due, paid, balance, status, payment_date, month, note, req.params.id, req.ownerId]
     );
     res.json(result.rows[0]);
   } catch (err) {

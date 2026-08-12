@@ -15,6 +15,7 @@ const emptyForm = {
   amount_due: "",
   amount_paid: "",
   payment_date: "",
+  note: "",
 };
 
 export default function PaymentsPage() {
@@ -70,6 +71,7 @@ export default function PaymentsPage() {
         amount_paid: form.amount_paid,
         payment_date: form.payment_date,
         month: storedMonth,
+        note: form.note,
       });
     } else {
       // POST upserts by tenant+month on the backend — this naturally
@@ -91,6 +93,7 @@ export default function PaymentsPage() {
       amount_due: p.amount_due,
       amount_paid: p.amount_paid,
       payment_date: p.payment_date ? p.payment_date.slice(0, 10) : "",
+      note: p.note || "",
     });
     setShowForm(true);
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -118,7 +121,8 @@ export default function PaymentsPage() {
         p.apartment_name?.toLowerCase().includes(q) ||
         p.unit_number?.toLowerCase().includes(q) ||
         p.month?.toLowerCase().includes(q) ||
-        formatMonthLabel(p.month).toLowerCase().includes(q)
+        formatMonthLabel(p.month).toLowerCase().includes(q) ||
+        p.note?.toLowerCase().includes(q)
     );
   }, [payments, search]);
 
@@ -206,6 +210,17 @@ export default function PaymentsPage() {
                 onChange={(e) => setForm({ ...form, payment_date: e.target.value })}
               />
             </div>
+            <div style={{ gridColumn: "1 / -1" }}>
+              <label className="field-label">Note (optional)</label>
+              <textarea
+                className="input-field"
+                rows={3}
+                value={form.note}
+                onChange={(e) => setForm({ ...form, note: e.target.value })}
+                placeholder="e.g. Paid partial amount, will settle balance next week…"
+                style={{ resize: "vertical" }}
+              />
+            </div>
           </div>
           <button type="submit" className="btn btn-primary" style={{ marginTop: 16 }}>
             {editingId ? "Save Changes" : "Save Payment"}
@@ -216,7 +231,7 @@ export default function PaymentsPage() {
       <div className="search-bar">
         <span>🔍</span>
         <input
-          placeholder="Search by tenant, apartment, unit, or month…"
+          placeholder="Search by tenant, apartment, unit, month, or note…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />

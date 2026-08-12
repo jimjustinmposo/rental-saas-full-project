@@ -280,6 +280,7 @@ export default function PaymentsPage() {
                   <th className="sortable" onClick={() => requestSort("status")}>
                     Status{sortIndicator("status")}
                   </th>
+                  <th>Note</th>
                   <th></th>
                 </tr>
               </thead>
@@ -292,6 +293,9 @@ export default function PaymentsPage() {
                     <td data-label="Paid">{formatMoney(p.amount_paid, currency)}</td>
                     <td data-label="Balance">{formatMoney(p.balance, currency)}</td>
                     <td data-label="Status">{statusPill(p.status)}</td>
+                    <td data-label="Note" style={{ maxWidth: 220, whiteSpace: "pre-line" }}>
+                      {p.note || "—"}
+                    </td>
                     <td data-label="" style={{ display: "flex", gap: 8 }}>
                       <button className="btn btn-secondary" style={{ padding: "6px 10px" }} onClick={() => handleEditClick(p)}>
                         Edit

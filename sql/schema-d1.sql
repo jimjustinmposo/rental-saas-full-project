@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS payments (
   balance REAL DEFAULT 0,
   status TEXT DEFAULT 'Unpaid' CHECK (status IN ('Paid', 'Late', 'Unpaid')),
   payment_date TEXT,
+  note TEXT,
   FOREIGN KEY (owner_id) REFERENCES owners(id) ON DELETE CASCADE,
   FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
   FOREIGN KEY (unit_id) REFERENCES units(id) ON DELETE SET NULL,

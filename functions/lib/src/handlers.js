@@ -690,41 +690,348 @@ async function handleExpenseRoutes(request, env, path) {
 // REPORT HANDLERS
 // ============================================================
 
+function currentMonthStr() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
 async function handleReportRoutes(request, env, path) {
   const method = request.method;
   const db = env.DB;
   const ownerId = await getOwnerId(request, env);
-  const body = await getBody(request);
 
   if (!ownerId) return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { "Content-Type": "application/json" } });
 
+  const url = new URL(request.url);
+  const jsonRes = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json" } });
+
   try {
-    if (method === "GET") {
-      const result = await query(db, `SELECT * FROM monthly_reports WHERE owner_id = ? ORDER BY month DESC`, [ownerId]);
-      return new Response(JSON.stringify(result.rows), { status: 200, headers: { "Content-Type": "application/json" } });
+    // GET /reports/dashboard?range=month|year|all
+    if (path === "dashboard" && method === "GET") {
+      const rangeParam = url.searchParams.get("range");
+      const range = ["month", "year", "all"].includes(rangeParam) ? rangeParam : "month";
+      const incomeRangeCond =
+        range === "month" ? "strftime('%Y-%m', payment_date) = strftime('%Y-%m','now')" :
+        range === "year" ? "strftime('%Y', payment_date) = strftime('%Y','now')" : "1=1";
+      const expenseRangeCond =
+        range === "month" ? "strftime('%Y-%m', date) = strftime('%Y-%m','now')" :
+        range === "year" ? "strftime('%Y', date) = strftime('%Y','now')" : "1=1";
+
+      const totals = await queryOne(db, `
+        SELECT
+          COALESCE(SUM(CASE WHEN strftime('%Y-%m', payment_date) = strftime('%Y-%m','now') THEN amount_paid ELSE 0 END), 0) AS income_this_month,
+          COALESCE(SUM(CASE WHEN payment_date = date('now') THEN amount_paid ELSE 0 END), 0) AS income_today,
+          COALESCE(SUM(CASE WHEN ${incomeRangeCond} THEN amount_paid ELSE 0 END), 0) AS income_range
+        FROM payments WHERE owner_id = ?`, [ownerId]);
+
+      const expenseTotals = await queryOne(db, `
+        SELECT
+          COALESCE(SUM(CASE WHEN strftime('%Y-%m', date) = strftime('%Y-%m','now') THEN amount ELSE 0 END), 0) AS expenses_this_month,
+          COALESCE(SUM(CASE WHEN date = date('now') THEN amount ELSE 0 END), 0) AS expenses_today,
+          COALESCE(SUM(CASE WHEN ${expenseRangeCond} THEN amount ELSE 0 END), 0) AS expenses_range
+        FROM expenses WHERE owner_id = ?`, [ownerId]);
+
+      const units = await queryOne(db, `
+        SELECT COUNT(*) AS total, SUM(CASE WHEN status = 'Occupied' THEN 1 ELSE 0 END) AS occupied
+        FROM units WHERE owner_id = ?`, [ownerId]);
+
+      const recentPayments = await query(db, `
+        SELECT p.*, t.name AS tenant_name
+        FROM payments p LEFT JOIN tenants t ON t.id = p.tenant_id
+        WHERE p.owner_id = ?
+        ORDER BY (p.payment_date IS NULL), p.payment_date DESC, p.id DESC
+        LIMIT 5`, [ownerId]);
+
+      const latestExpenses = await query(db, `
+        SELECT e.*, a.name AS apartment_name
+        FROM expenses e LEFT JOIN apartments a ON a.id = e.apartment_id
+        WHERE e.owner_id = ?
+        ORDER BY (e.date IS NULL), e.date DESC, e.id DESC
+        LIMIT 5`, [ownerId]);
+
+      const incomeRange = Number(totals.income_range) || 0;
+      const expensesRange = Number(expenseTotals.expenses_range) || 0;
+
+      return jsonRes({
+        range,
+        totalIncome: incomeRange,
+        totalExpenses: expensesRange,
+        netProfit: incomeRange - expensesRange,
+        incomeToday: Number(totals.income_today) || 0,
+        expensesToday: Number(expenseTotals.expenses_today) || 0,
+        occupiedUnits: Number(units.occupied) || 0,
+        totalUnits: Number(units.total) || 0,
+        recentPayments: recentPayments.rows,
+        latestExpenses: latestExpenses.rows,
+      });
     }
 
-    if (method === "POST") {
-      if (!body) return new Response(JSON.stringify({ error: "Invalid request" }), { status: 400, headers: { "Content-Type": "application/json" } });
+    // GET /reports/trend?view=month|year|all&apartment_id=
+    if (path === "trend" && method === "GET") {
+      const viewParam = url.searchParams.get("view");
+      const view = ["month", "year", "all"].includes(viewParam) ? viewParam : "month";
+      const apartmentId = url.searchParams.get("apartment_id");
+
+      if (view === "all") {
+        const incomeParams = [ownerId];
+        let incomeSql = `SELECT COALESCE(SUM(amount_paid),0) AS value FROM payments WHERE owner_id = ?`;
+        if (apartmentId) { incomeSql += ` AND apartment_id = ?`; incomeParams.push(apartmentId); }
+        const expenseParams = [ownerId];
+        let expenseSql = `SELECT COALESCE(SUM(amount),0) AS value FROM expenses WHERE owner_id = ?`;
+        if (apartmentId) { expenseSql += ` AND apartment_id = ?`; expenseParams.push(apartmentId); }
+        const income = await queryOne(db, incomeSql, incomeParams);
+        const expenses = await queryOne(db, expenseSql, expenseParams);
+        return jsonRes({ data: [{ label: "All Time", income: Number(income.value) || 0, expenses: Number(expenses.value) || 0 }] });
+      }
+
+      const incomeLabelExpr = view === "year" ? "substr(month, 1, 4)" : "month";
+      const incomeParams = [ownerId];
+      let incomeSql = `SELECT ${incomeLabelExpr} AS label, SUM(amount_paid) AS income FROM payments WHERE owner_id = ? AND month IS NOT NULL`;
+      if (apartmentId) { incomeSql += ` AND apartment_id = ?`; incomeParams.push(apartmentId); }
+      incomeSql += ` GROUP BY label`;
+
+      const expenseLabelExpr = view === "year" ? "strftime('%Y', date)" : "strftime('%Y-%m', date)";
+      const expenseParams = [ownerId];
+      let expenseSql = `SELECT ${expenseLabelExpr} AS label, SUM(amount) AS expenses FROM expenses WHERE owner_id = ? AND date IS NOT NULL`;
+      if (apartmentId) { expenseSql += ` AND apartment_id = ?`; expenseParams.push(apartmentId); }
+      expenseSql += ` GROUP BY label`;
+
+      const incomeResult = await query(db, incomeSql, incomeParams);
+      const expenseResult = await query(db, expenseSql, expenseParams);
+
+      const merged = new Map();
+      for (const row of incomeResult.rows) {
+        merged.set(row.label, { label: row.label, income: Number(row.income) || 0, expenses: 0 });
+      }
+      for (const row of expenseResult.rows) {
+        const existing = merged.get(row.label) || { label: row.label, income: 0, expenses: 0 };
+        existing.expenses = Number(row.expenses) || 0;
+        merged.set(row.label, existing);
+      }
+      const data = Array.from(merged.values()).sort((a, b) => (a.label > b.label ? 1 : a.label < b.label ? -1 : 0));
+      return jsonRes({ data });
+    }
+
+    // GET /reports/checklist?month=YYYY-MM
+    if (path === "checklist" && method === "GET") {
+      const month = url.searchParams.get("month") || currentMonthStr();
+      const result = await query(db, `
+        SELECT a.id AS apartment_id, a.name AS apartment_name,
+               t.id AS tenant_id, t.name AS tenant_name,
+               u.current_rent,
+               CASE WHEN p.id IS NOT NULL AND p.status = 'Paid' THEN 1 ELSE 0 END AS paid
+        FROM apartments a
+        JOIN units u ON u.apartment_id = a.id AND u.owner_id = a.owner_id
+        JOIN tenants t ON t.unit_id = u.id AND t.owner_id = a.owner_id AND t.status = 'Active'
+        LEFT JOIN payments p ON p.tenant_id = t.id AND p.month = ? AND p.owner_id = a.owner_id
+        WHERE a.owner_id = ?
+        ORDER BY a.name, t.name`, [month, ownerId]);
+
+      const grouped = {};
+      for (const row of result.rows) {
+        if (!grouped[row.apartment_id]) {
+          grouped[row.apartment_id] = { apartment_id: row.apartment_id, apartment_name: row.apartment_name, tenants: [] };
+        }
+        grouped[row.apartment_id].tenants.push({
+          tenant_id: row.tenant_id,
+          tenant_name: row.tenant_name,
+          current_rent: row.current_rent,
+          paid: Boolean(row.paid),
+        });
+      }
+      return jsonRes({ month, apartments: Object.values(grouped) });
+    }
+
+    // POST /reports/checklist/toggle  { tenant_id, month, checked }
+    if (path === "checklist/toggle" && method === "POST") {
+      const body = await getBody(request);
+      const { tenant_id, month, checked } = body || {};
+      if (!tenant_id || !month) return jsonRes({ error: "tenant_id and month are required." }, 400);
+
+      const tenant = await queryOne(db, `
+        SELECT t.id, t.unit_id, u.apartment_id, u.current_rent
+        FROM tenants t LEFT JOIN units u ON u.id = t.unit_id
+        WHERE t.id = ? AND t.owner_id = ?`, [tenant_id, ownerId]);
+      if (!tenant) return jsonRes({ error: "Tenant not found." }, 404);
+
+      if (!checked) {
+        await execute(db, `DELETE FROM payments WHERE owner_id = ? AND tenant_id = ? AND month = ?`, [ownerId, tenant_id, month]);
+        return jsonRes({ tenant_id, month, paid: false });
+      }
+
+      const rent = Number(tenant.current_rent) || 0;
+      const existing = await queryOne(db, `SELECT id FROM payments WHERE owner_id = ? AND tenant_id = ? AND month = ?`, [ownerId, tenant_id, month]);
+
+      if (existing) {
+        await execute(db, `
+          UPDATE payments SET amount_due = ?, amount_paid = ?, balance = 0, status = 'Paid', payment_date = date('now')
+          WHERE id = ? AND owner_id = ?`, [rent, rent, existing.id, ownerId]);
+      } else {
+        await execute(db, `
+          INSERT INTO payments (owner_id, tenant_id, unit_id, apartment_id, month, amount_due, amount_paid, balance, status, payment_date)
+          VALUES (?, ?, ?, ?, ?, ?, ?, 0, 'Paid', date('now'))`,
+          [ownerId, tenant_id, tenant.unit_id, tenant.apartment_id, month, rent, rent]);
+      }
+      return jsonRes({ tenant_id, month, paid: true });
+    }
+
+    // GET /reports/months?apartment_id=
+    if (path === "months" && method === "GET") {
+      const apartmentId = url.searchParams.get("apartment_id");
+      const paymentParams = [ownerId];
+      let paymentSql = `SELECT DISTINCT month FROM payments WHERE owner_id = ? AND month IS NOT NULL`;
+      if (apartmentId) { paymentSql += ` AND apartment_id = ?`; paymentParams.push(apartmentId); }
+
+      const expenseParams = [ownerId];
+      let expenseSql = `SELECT DISTINCT strftime('%Y-%m', date) AS month FROM expenses WHERE owner_id = ? AND date IS NOT NULL`;
+      if (apartmentId) { expenseSql += ` AND apartment_id = ?`; expenseParams.push(apartmentId); }
+
+      const paymentMonths = await query(db, paymentSql, paymentParams);
+      const expenseMonths = await query(db, expenseSql, expenseParams);
+      const months = Array.from(new Set([...paymentMonths.rows.map((r) => r.month), ...expenseMonths.rows.map((r) => r.month)])).sort().reverse();
+      return jsonRes({ months });
+    }
+
+    // GET /reports/years?apartment_id=
+    if (path === "years" && method === "GET") {
+      const apartmentId = url.searchParams.get("apartment_id");
+      const paymentParams = [ownerId];
+      let paymentSql = `SELECT DISTINCT substr(month, 1, 4) AS year FROM payments WHERE owner_id = ? AND month IS NOT NULL`;
+      if (apartmentId) { paymentSql += ` AND apartment_id = ?`; paymentParams.push(apartmentId); }
+
+      const expenseParams = [ownerId];
+      let expenseSql = `SELECT DISTINCT strftime('%Y', date) AS year FROM expenses WHERE owner_id = ? AND date IS NOT NULL`;
+      if (apartmentId) { expenseSql += ` AND apartment_id = ?`; expenseParams.push(apartmentId); }
+
+      const paymentYears = await query(db, paymentSql, paymentParams);
+      const expenseYears = await query(db, expenseSql, expenseParams);
+      const years = Array.from(new Set([...paymentYears.rows.map((r) => r.year), ...expenseYears.rows.map((r) => r.year)])).sort().reverse();
+      return jsonRes({ years });
+    }
+
+    // GET /reports/monthly?apartment_id=&month=YYYY-MM (also doubles as the "Total" report when month is omitted)
+    if (path === "monthly" && method === "GET") {
+      const apartmentId = url.searchParams.get("apartment_id");
+      const month = url.searchParams.get("month");
+
+      const incomeParams = [ownerId];
+      let incomeSql = `SELECT COALESCE(SUM(amount_paid),0) AS income FROM payments WHERE owner_id = ?`;
+      if (apartmentId) { incomeSql += ` AND apartment_id = ?`; incomeParams.push(apartmentId); }
+      if (month) { incomeSql += ` AND month = ?`; incomeParams.push(month); }
+
+      const expenseParams = [ownerId];
+      let expenseSql = `SELECT COALESCE(SUM(amount),0) AS expenses FROM expenses WHERE owner_id = ?`;
+      if (apartmentId) { expenseSql += ` AND apartment_id = ?`; expenseParams.push(apartmentId); }
+      if (month) { expenseSql += ` AND strftime('%Y-%m', date) = ?`; expenseParams.push(month); }
+
+      const income = await queryOne(db, incomeSql, incomeParams);
+      const expenses = await queryOne(db, expenseSql, expenseParams);
+      const totalIncome = Number(income.income) || 0;
+      const totalExpenses = Number(expenses.expenses) || 0;
+
+      return jsonRes({
+        month: month || "all",
+        apartment_id: apartmentId || null,
+        totalIncome,
+        totalExpenses,
+        profit: totalIncome - totalExpenses,
+      });
+    }
+
+    // GET /reports/yearly?apartment_id=&year=YYYY
+    if (path === "yearly" && method === "GET") {
+      const apartmentId = url.searchParams.get("apartment_id");
+      const year = url.searchParams.get("year");
+      if (!year) return jsonRes({ error: "year is required." }, 400);
+
+      const incomeParams = [ownerId, year];
+      let incomeSql = `SELECT COALESCE(SUM(amount_paid),0) AS income FROM payments WHERE owner_id = ? AND substr(month, 1, 4) = ?`;
+      if (apartmentId) { incomeSql += ` AND apartment_id = ?`; incomeParams.push(apartmentId); }
+
+      const expenseParams = [ownerId, year];
+      let expenseSql = `SELECT COALESCE(SUM(amount),0) AS expenses FROM expenses WHERE owner_id = ? AND strftime('%Y', date) = ?`;
+      if (apartmentId) { expenseSql += ` AND apartment_id = ?`; expenseParams.push(apartmentId); }
+
+      const income = await queryOne(db, incomeSql, incomeParams);
+      const expenses = await queryOne(db, expenseSql, expenseParams);
+      const totalIncome = Number(income.income) || 0;
+      const totalExpenses = Number(expenses.expenses) || 0;
+
+      return jsonRes({
+        year,
+        apartment_id: apartmentId || null,
+        totalIncome,
+        totalExpenses,
+        profit: totalIncome - totalExpenses,
+      });
+    }
+
+    // POST /reports/generate — save a monthly_reports snapshot
+    if (path === "generate" && method === "POST") {
+      const body = await getBody(request);
+      if (!body) return jsonRes({ error: "Invalid request" }, 400);
       const { apartment_id, month, total_income, total_expenses } = body;
-      if (!month) return new Response(JSON.stringify({ error: "month required" }), { status: 400, headers: { "Content-Type": "application/json" } });
+      if (!month) return jsonRes({ error: "month is required." }, 400);
       const income = Number(total_income) || 0;
       const expenses = Number(total_expenses) || 0;
       const profit = income - expenses;
-      const existing = await queryOne(db, `SELECT id FROM monthly_reports WHERE owner_id = ? AND month = ? ${apartment_id ? "AND apartment_id = ?" : "AND apartment_id IS NULL"}`, apartment_id ? [ownerId, month, apartment_id] : [ownerId, month]);
-      if (existing) {
-        await execute(db, `UPDATE monthly_reports SET total_income = ?, total_expenses = ?, profit = ? WHERE id = ? AND owner_id = ?`, [income, expenses, profit, existing.id, ownerId]);
-        const result = await queryOne(db, "SELECT * FROM monthly_reports WHERE id = ? AND owner_id = ?", [existing.id, ownerId]);
-        return new Response(JSON.stringify(result), { status: 200, headers: { "Content-Type": "application/json" } });
-      }
-      await execute(db, `INSERT INTO monthly_reports (owner_id, apartment_id, month, total_income, total_expenses, profit)
+      await execute(db, `
+        INSERT INTO monthly_reports (owner_id, apartment_id, month, total_income, total_expenses, profit)
         VALUES (?, ?, ?, ?, ?, ?)`, [ownerId, apartment_id || null, month, income, expenses, profit]);
-      const result = await queryOne(db, "SELECT * FROM monthly_reports WHERE owner_id = ? ORDER BY id DESC LIMIT 1", [ownerId]);
-      return new Response(JSON.stringify(result), { status: 201, headers: { "Content-Type": "application/json" } });
+      const result = await queryOne(db, `SELECT * FROM monthly_reports WHERE owner_id = ? ORDER BY id DESC LIMIT 1`, [ownerId]);
+      return jsonRes(result, 201);
     }
+
+    // GET /reports/history — all saved snapshots
+    if (path === "history" && method === "GET") {
+      const result = await query(db, `
+        SELECT r.*, a.name AS apartment_name
+        FROM monthly_reports r LEFT JOIN apartments a ON a.id = r.apartment_id
+        WHERE r.owner_id = ? ORDER BY r.generated_at DESC`, [ownerId]);
+      return jsonRes(result.rows);
+    }
+
+    // DELETE /reports/history — wipe all saved snapshots
+    if (path === "history" && method === "DELETE") {
+      const result = await execute(db, `DELETE FROM monthly_reports WHERE owner_id = ?`, [ownerId]);
+      return jsonRes({ success: true, deletedCount: result.changes });
+    }
+
+    // GET /reports/pending-all — every outstanding balance across all recorded months
+    if (path === "pending-all" && method === "GET") {
+      const result = await query(db, `
+        SELECT t.id AS tenant_id, t.name AS tenant_name, t.status AS tenant_status,
+               a.name AS apartment_name, u.unit_number,
+               SUM(p.balance) AS total_pending,
+               COUNT(*) AS unpaid_months
+        FROM payments p
+        JOIN tenants t ON t.id = p.tenant_id
+        LEFT JOIN units u ON u.id = p.unit_id
+        LEFT JOIN apartments a ON a.id = p.apartment_id
+        WHERE p.owner_id = ? AND p.balance > 0
+        GROUP BY t.id, t.name, t.status, a.name, u.unit_number
+        ORDER BY total_pending DESC`, [ownerId]);
+
+      // SQLite/D1 has no array_agg, so fetch each tenant's unpaid months separately.
+      const pending = [];
+      for (const row of result.rows) {
+        const months = await query(db, `
+          SELECT month FROM payments WHERE owner_id = ? AND tenant_id = ? AND balance > 0 ORDER BY month`, [ownerId, row.tenant_id]);
+        pending.push({ ...row, unpaid_month_list: months.rows.map((m) => m.month) });
+      }
+      return jsonRes({ pending });
+    }
+
+    // GET /reports (bare) — list all snapshots, kept for backward compatibility
+    if (!path && method === "GET") {
+      const result = await query(db, `SELECT * FROM monthly_reports WHERE owner_id = ? ORDER BY month DESC`, [ownerId]);
+      return jsonRes(result.rows);
+    }
+
+    return jsonRes({ error: "Not found" }, 404);
   } catch (err) {
     console.error("[reports]", err);
-    return new Response(JSON.stringify({ error: "Server error" }), { status: 500, headers: { "Content-Type": "application/json" } });
+    return jsonRes({ error: "Server error" }, 500);
   }
 }
 

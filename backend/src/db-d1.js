@@ -67,6 +67,7 @@ CREATE TABLE IF NOT EXISTS payments (
   balance REAL DEFAULT 0,
   status TEXT DEFAULT 'Unpaid' CHECK (status IN ('Paid', 'Late', 'Unpaid')),
   payment_date TEXT,
+  note TEXT,
   FOREIGN KEY (owner_id) REFERENCES owners(id) ON DELETE CASCADE,
   FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
   FOREIGN KEY (unit_id) REFERENCES units(id) ON DELETE SET NULL,
@@ -221,6 +222,18 @@ async function initializeSchema(db) {
 
     for (const statement of statements) {
       await db.prepare(statement).run();
+    }
+
+    // Migration: older deployments created the payments table before the
+    // `note` column existed. ALTER TABLE has no "IF NOT EXISTS" in SQLite,
+    // so just attempt it and swallow the "duplicate column" error if it's
+    // already there.
+    try {
+      await db.prepare("ALTER TABLE payments ADD COLUMN note TEXT").run();
+    } catch (alterErr) {
+      if (!/duplicate column/i.test(alterErr.message || "")) {
+        console.error("[db] Migration error (payments.note):", alterErr);
+      }
     }
 
     console.log("[db] Schema initialized");

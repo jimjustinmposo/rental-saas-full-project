@@ -1,0 +1,46 @@
+# Environment variables for local development
+# Copy this file to .dev.vars and update values as needed
+# .dev.vars is in .gitignore and never committed
+
+# ============================================================
+# FRONTEND & CORS
+# ============================================================
+FRONTEND_URL=http://localhost:3000
+
+# ============================================================
+# ADMIN ACCESS
+# ============================================================
+# Must match the password users enter when creating accounts
+ADMIN_SIGNUP_PASSWORD=fmc10123
+
+# ============================================================
+# JWT SECRET
+# ============================================================
+# Used to sign/verify authentication tokens
+# Generate a secure random string for production
+# Example: openssl rand -base64 32
+JWT_SECRET=your-dev-jwt-secret-key-change-in-production
+
+# ============================================================
+# ENVIRONMENT
+# ============================================================
+NODE_ENV=development
+
+# ============================================================
+# R2 BUCKET URL (Optional)
+# ============================================================
+# If you have R2 configured, set the public URL for uploads
+# Example: https://cdn.yourdomain.com
+# Leave blank to use /uploads (local dev fallback)
+R2_BUCKET_URL=
+
+# ============================================================
+# PRODUCTION DEPLOYMENT NOTES
+# ============================================================
+# For production, set secrets using:
+#   wrangler secret put ADMIN_SIGNUP_PASSWORD
+#   wrangler secret put JWT_SECRET
+#   wrangler secret put FRONTEND_URL
+#
+# Do NOT commit .dev.vars to git
+# Always use unique, strong secrets in production

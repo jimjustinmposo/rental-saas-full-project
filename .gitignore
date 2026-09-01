@@ -1,0 +1,52 @@
+# Environment & Secrets
+.dev.vars
+.env
+.env.local
+.env.*.local
+
+# Dependencies
+node_modules/
+package-lock.json
+yarn.lock
+
+# Build outputs
+dist/
+build/
+.next/
+out/
+
+# Cloudflare
+.wrangler/
+wrangler.toml.prod
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Data migration files
+exported-data.json
+import-data.sql
+
+# OS
+Thumbs.db
+.AppleDouble
+.LSOverride
+
+# Testing
+coverage/
+.nyc_output/
+
+# Production
+dist/
+.next/

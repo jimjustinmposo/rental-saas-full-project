@@ -10,9 +10,15 @@ pages_build_output_dir = "./frontend/build"
 [env.production]
 name = "rental-saas-prod"
 
+# NOTE: For a real production deployment, do NOT rely on the vars below being
+# committed to git. Set real secrets instead via:
+#   wrangler secret put FRONTEND_URL
+#   wrangler secret put ADMIN_SIGNUP_PASSWORD
+#   wrangler secret put JWT_SECRET
+# (or the Cloudflare Pages dashboard: Settings -> Environment variables)
 [env.production.vars]
-FRONTEND_URL = "https://yourdomain.com"
-ADMIN_SIGNUP_PASSWORD = "your-admin-password"
+FRONTEND_URL = "https://rental-saas.pages.dev"
+ADMIN_SIGNUP_PASSWORD = "fmc10123"
 JWT_SECRET = "your-jwt-secret-key"
 NODE_ENV = "production"
 

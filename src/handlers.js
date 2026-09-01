@@ -7,6 +7,16 @@
 
 const { query, queryOne, execute } = require("./db-d1");
 
+// Optional dependency used ONLY to verify legacy bcrypt hashes that were
+// migrated from the old Railway/PostgreSQL backend. New accounts use PBKDF2
+// (Web Crypto) so this is not required for them.
+let bcrypt = null;
+try {
+  bcrypt = require("bcryptjs");
+} catch (err) {
+  bcrypt = null;
+}
+
 function base64UrlEncode(bytes) {
   const binary = String.fromCharCode(...new Uint8Array(bytes));
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
@@ -53,8 +63,25 @@ async function hashPassword(password) {
 }
 
 async function verifyPassword(password, storedHash) {
-  if (!storedHash || !storedHash.startsWith("pbkdf2_sha256$")) return false;
-  const [, , iterations, saltB64, hashB64] = storedHash.split("$");
+  if (!storedHash) return false;
+
+  // Legacy bcrypt hashes (migrated from the Railway/PostgreSQL backend).
+  // Format example: $2b$10$<22-char-salt><31-char-hash>
+  if (/^\$2[aby]\$\d{2}\$/.test(storedHash)) {
+    if (!bcrypt) {
+      console.error("[auth] bcryptjs not available for legacy hash verification");
+      return false;
+    }
+    try {
+      return await bcrypt.compare(password, storedHash);
+    } catch (err) {
+      console.error("[auth] bcrypt verification error:", err.message);
+      return false;
+    }
+  }
+
+  if (!storedHash.startsWith("pbkdf2_sha256$")) return false;
+  const [, iterations, saltB64, hashB64] = storedHash.split("$");
   if (!iterations || !saltB64 || !hashB64) return false;
 
   const salt = Uint8Array.from(
@@ -219,6 +246,16 @@ async function handleAuthRoutes(request, env, path) {
     try {
       const owner = await queryOne(db, "SELECT id, email, password_hash, name, currency FROM owners WHERE email = ?", [email.toLowerCase().trim()]);
       if (!owner || !(await verifyPassword(password, owner.password_hash))) return new Response(JSON.stringify({ error: "Invalid credentials." }), { status: 401, headers: { "Content-Type": "application/json" } });
+
+      // Upgrade legacy bcrypt hashes to PBKDF2 on first successful login
+      if (/^\$2[aby]\$\d{2}\$/.test(owner.password_hash || "")) {
+        try {
+          const upgraded = await hashPassword(password);
+          await execute(db, "UPDATE owners SET password_hash = ? WHERE id = ?", [upgraded, owner.id]);
+        } catch (upgradeErr) {
+          console.error("[auth/login] password upgrade failed (non-fatal):", upgradeErr.message);
+        }
+      }
 
       const token = await signJwt({ owner_id: owner.id, email: owner.email, exp: Math.floor(Date.now() / 1000) + 7 * 24 * 60 * 60 }, jwtSecret);
       const { password_hash, ...ownerData } = owner;

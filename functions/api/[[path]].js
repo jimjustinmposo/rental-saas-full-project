@@ -16,22 +16,40 @@ const {
   handlePaymentRoutes,
   handleExpenseRoutes,
   handleReportRoutes,
-} = require("../../src/handlers");
+} = require("../lib/src/handlers");
 
-const { initializeSchema } = require("../../src/db-d1");
+const { initializeSchema } = require("../lib/src/db-d1");
+
+/**
+ * Resolve the allowed CORS origin.
+ * Reflects the request's Origin header when it matches the configured
+ * FRONTEND_URL (comma-separated allowed list), otherwise falls back to the
+ * first configured value, so the deployed pages.dev domain (and any custom
+ * domain added later) works without CORS errors.
+ */
+function getAllowedOrigin(request, env) {
+  const origin = request.headers.get("Origin");
+  const allowed = (env.FRONTEND_URL || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (origin && (allowed.length === 0 || allowed.includes(origin))) return origin;
+  if (allowed.length > 0) return allowed[0];
+  return origin || "*";
+}
 
 /**
  * Add CORS headers to response
  */
-function addCorsHeaders(response, env) {
+function addCorsHeaders(request, response, env) {
   const headers = new Headers(response.headers);
-  const frontendUrl = env.FRONTEND_URL || "*";
-  
-  headers.set("Access-Control-Allow-Origin", frontendUrl);
+  const allowedOrigin = getAllowedOrigin(request, env);
+
+  headers.set("Access-Control-Allow-Origin", allowedOrigin);
   headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS");
   headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
   headers.set("Access-Control-Allow-Credentials", "true");
-  
+
   return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,
@@ -42,11 +60,12 @@ function addCorsHeaders(response, env) {
 /**
  * Handle OPTIONS requests (CORS preflight)
  */
-function handleOptions(env) {
+function handleOptions(request, env) {
+  const allowedOrigin = getAllowedOrigin(request, env);
   return new Response(null, {
     status: 204,
     headers: {
-      "Access-Control-Allow-Origin": env.FRONTEND_URL || "*",
+      "Access-Control-Allow-Origin": allowedOrigin,
       "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, PATCH, OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type, Authorization",
     },
@@ -65,7 +84,7 @@ export async function onRequest(context) {
 
   // Handle OPTIONS for CORS
   if (request.method === "OPTIONS") {
-    return handleOptions(env);
+    return handleOptions(request, env);
   }
 
   try {
@@ -125,7 +144,7 @@ export async function onRequest(context) {
     }
 
     // Add CORS headers to all responses
-    return addCorsHeaders(response, env);
+    return addCorsHeaders(request, response, env);
   } catch (err) {
     console.error("[api] Unhandled error:", err);
     
@@ -134,6 +153,6 @@ export async function onRequest(context) {
       { status: 500, headers: { "Content-Type": "application/json" } }
     );
     
-    return addCorsHeaders(response, env);
+    return addCorsHeaders(request, response, env);
   }
 }

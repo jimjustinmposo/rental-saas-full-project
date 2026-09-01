@@ -1,6 +1,10 @@
 import axios from "axios";
 
-const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || "http://localhost:8787/api";
+// Same-origin by default: the Cloudflare Pages Functions are served from the
+// same domain as the frontend (e.g. https://rental-saas.pages.dev/api/...),
+// so `/api` works for every deployment. Override with REACT_APP_API_BASE_URL
+// only if the API lives on a different host (e.g. a local backend during dev).
+const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || "/api";
 
 const apiClient = axios.create({
   baseURL: API_BASE_URL,

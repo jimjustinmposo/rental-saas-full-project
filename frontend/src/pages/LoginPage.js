@@ -18,7 +18,12 @@ export default function LoginPage() {
       await login(email, password);
       navigate("/dashboard");
     } catch (err) {
-      setError(err.response?.data?.error || "Login failed. Please try again.");
+      // A response from the API means we can show its error message.
+      // No response (network error, mixed content, CORS, API down) needs a clearer hint.
+      setError(
+        err.response?.data?.error ||
+          "Cannot reach the server. Check your internet connection and try again."
+      );
     } finally {
       setLoading(false);
     }

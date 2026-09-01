@@ -3,6 +3,12 @@ compatibility_date = "2024-09-01"
 compatibility_flags = ["nodejs_compat"]
 pages_build_output_dir = "./frontend/build"
 
+# Build command used by Cloudflare Pages when deploying from the connected Git
+# repo. Without this, Pages skips the build step and there are no assets to
+# upload (the previous deploy failed with "Output directory ... not found").
+[build]
+command = "cd frontend && npm ci --no-audit --no-fund && CI=false npm run build && cd ../functions && npm install --omit=dev --no-audit --no-fund"
+
 # ============================================================
 # ENVIRONMENTS
 # ============================================================

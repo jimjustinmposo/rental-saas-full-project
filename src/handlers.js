@@ -276,7 +276,7 @@ async function handleAuthRoutes(request, env, path) {
 async function handleApartmentRoutes(request, env, path) {
   const method = request.method;
   const db = env.DB;
-  const ownerId = getOwnerId(request, env);
+  const ownerId = await getOwnerId(request, env);
   const body = await getBody(request);
 
   if (!ownerId) return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { "Content-Type": "application/json" } });
@@ -344,7 +344,7 @@ async function handleApartmentRoutes(request, env, path) {
 async function handleUnitRoutes(request, env, path) {
   const method = request.method;
   const db = env.DB;
-  const ownerId = getOwnerId(request, env);
+  const ownerId = await getOwnerId(request, env);
   const body = await getBody(request);
 
   if (!ownerId) return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { "Content-Type": "application/json" } });
@@ -422,7 +422,7 @@ async function handleUnitRoutes(request, env, path) {
 async function handleTenantRoutes(request, env, path) {
   const method = request.method;
   const db = env.DB;
-  const ownerId = getOwnerId(request, env);
+  const ownerId = await getOwnerId(request, env);
   const bucket = env.BUCKET;
 
   if (!ownerId) return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { "Content-Type": "application/json" } });
@@ -538,7 +538,7 @@ async function handleTenantRoutes(request, env, path) {
 async function handlePaymentRoutes(request, env, path) {
   const method = request.method;
   const db = env.DB;
-  const ownerId = getOwnerId(request, env);
+  const ownerId = await getOwnerId(request, env);
   const body = await getBody(request);
 
   if (!ownerId) return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { "Content-Type": "application/json" } });
@@ -624,7 +624,7 @@ async function handlePaymentRoutes(request, env, path) {
 async function handleExpenseRoutes(request, env, path) {
   const method = request.method;
   const db = env.DB;
-  const ownerId = getOwnerId(request, env);
+  const ownerId = await getOwnerId(request, env);
   const body = await getBody(request);
 
   if (!ownerId) return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { "Content-Type": "application/json" } });
@@ -693,7 +693,7 @@ async function handleExpenseRoutes(request, env, path) {
 async function handleReportRoutes(request, env, path) {
   const method = request.method;
   const db = env.DB;
-  const ownerId = getOwnerId(request, env);
+  const ownerId = await getOwnerId(request, env);
   const body = await getBody(request);
 
   if (!ownerId) return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { "Content-Type": "application/json" } });

@@ -9,9 +9,6 @@ pages_build_output_dir = "./frontend/build"
 
 [env.production]
 name = "rental-saas-prod"
-routes = [
-  { pattern = "api.yourdomain.com/api/*", zone_name = "yourdomain.com" }
-]
 
 [env.production.vars]
 FRONTEND_URL = "https://yourdomain.com"
@@ -19,29 +16,31 @@ ADMIN_SIGNUP_PASSWORD = "your-admin-password"
 JWT_SECRET = "your-jwt-secret-key"
 NODE_ENV = "production"
 
-[env.staging]
-name = "rental-saas-staging"
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "rental-saas-db"
+database_id = "74ab9451-08f6-44b2-a151-0938c8a928e5"
 
-[env.staging.vars]
+[[env.production.r2_buckets]]
+binding = "BUCKET"
+bucket_name = "rental-saas-uploads"
+jurisdiction = "eu"
+
+[env.preview]
+name = "rental-saas-preview"
+
+[env.preview.vars]
 FRONTEND_URL = "http://localhost:3000"
 ADMIN_SIGNUP_PASSWORD = "dev-admin-password"
 JWT_SECRET = "dev-jwt-secret-key"
 NODE_ENV = "development"
 
-# ============================================================
-# BINDINGS - D1 Database
-# ============================================================
-
-[[d1_databases]]
+[[env.preview.d1_databases]]
 binding = "DB"
 database_name = "rental-saas-db"
 database_id = "74ab9451-08f6-44b2-a151-0938c8a928e5"
 
-# ============================================================
-# BINDINGS - R2 Object Storage
-# ============================================================
-
-[[r2_buckets]]
+[[env.preview.r2_buckets]]
 binding = "BUCKET"
 bucket_name = "rental-saas-uploads"
 jurisdiction = "eu"

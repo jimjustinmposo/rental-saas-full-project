@@ -34,9 +34,11 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# Data migration files
+# Data migration files (contain personal data & password hashes - never commit)
 exported-data.json
+migration-data.json
 import-data.sql
+import-data-fixed.sql
 
 # OS
 Thumbs.db

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import apiClient from "../api/apiClient";
 import { useAuth } from "../api/AuthContext";
 import { formatMoney } from "../utils/currency";
@@ -12,6 +12,7 @@ export default function PaymentChecklist() {
   const [loading, setLoading] = useState(true);
   const [togglingId, setTogglingId] = useState(null);
   const [apartmentFilter, setApartmentFilter] = useState(""); // "" = All
+  const [search, setSearch] = useState("");
 
   const load = (m) => {
     setLoading(true);
@@ -39,11 +40,28 @@ export default function PaymentChecklist() {
     }
   };
 
-  const visibleApartments = data
-    ? apartmentFilter
-      ? data.apartments.filter((apt) => String(apt.apartment_id) === String(apartmentFilter))
-      : data.apartments
-    : [];
+  // Combines the flat dropdown and the free-text search. The search matches
+  // tenant names OR apartment names (case-insensitive); any flat whose tenants
+  // no longer match is hidden entirely. Memoized so typing stays instant.
+  const visibleApartments = useMemo(() => {
+    if (!data) return [];
+    let apartments = data.apartments;
+    if (apartmentFilter) {
+      apartments = apartments.filter((apt) => String(apt.apartment_id) === String(apartmentFilter));
+    }
+    const q = search.trim().toLowerCase();
+    if (!q) return apartments;
+    return apartments
+      .map((apt) => ({
+        ...apt,
+        tenants: apt.tenants.filter(
+          (t) =>
+            t.tenant_name?.toLowerCase().includes(q) ||
+            apt.apartment_name?.toLowerCase().includes(q)
+        ),
+      }))
+      .filter((apt) => apt.tenants.length > 0);
+  }, [data, search, apartmentFilter]);
 
   return (
     <div className="card">
@@ -73,12 +91,23 @@ export default function PaymentChecklist() {
         </div>
       </div>
 
+      <div className="search-bar">
+        <span>🔍</span>
+        <input
+          placeholder="Search tenant or flat…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+      </div>
+
       {loading ? (
         <div className="empty-state">Loading…</div>
       ) : !data || data.apartments.length === 0 ? (
         <div className="empty-state">No active tenants yet.</div>
       ) : visibleApartments.length === 0 ? (
-        <div className="empty-state">No active tenants for this flat.</div>
+        <div className="empty-state">
+          {search.trim() ? "No tenants match your search." : "No active tenants for this flat."}
+        </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
           {visibleApartments.map((apt) => (

@@ -5,7 +5,7 @@
  * that work with Cloudflare's Request/Response API
  */
 
-const { query, queryOne, execute } = require("./db-d1");
+const { query, queryOne, execute, batch } = require("./db-d1");
 
 // Optional dependency used ONLY to verify legacy bcrypt hashes that were
 // migrated from the old Railway/PostgreSQL backend. New accounts use PBKDF2
@@ -112,17 +112,33 @@ async function verifyPassword(password, storedHash) {
   return safeEqual(expected, hashB64);
 }
 
+/**
+ * Cache per-secret HMAC CryptoKeys so authenticated requests don't pay for a
+ * fresh WebCrypto importKey() on every call. Secrets never change at runtime,
+ * so keys are stable for the lifetime of the isolate.
+ */
+const hmacKeyCache = new Map();
+
+async function getHmacKey(secret) {
+  let key = hmacKeyCache.get(secret);
+  if (!key) {
+    key = await crypto.subtle.importKey(
+      "raw",
+      new TextEncoder().encode(secret),
+      { name: "HMAC", hash: { name: "SHA-256" } },
+      false,
+      ["sign"]
+    );
+    hmacKeyCache.set(secret, key);
+  }
+  return key;
+}
+
 async function signJwt(payload, secret) {
   const header = base64UrlEncode(new TextEncoder().encode(JSON.stringify({ alg: "HS256", typ: "JWT" })));
   const body = base64UrlEncode(new TextEncoder().encode(JSON.stringify(payload)));
   const signingInput = `${header}.${body}`;
-  const key = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(secret),
-    { name: "HMAC", hash: { name: "SHA-256" } },
-    false,
-    ["sign"]
-  );
+  const key = await getHmacKey(secret);
   const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(signingInput));
   return `${signingInput}.${base64UrlEncode(signature)}`;
 }
@@ -132,13 +148,7 @@ async function verifyJwt(token, secret) {
   if (parts.length !== 3) throw new Error("Invalid JWT");
   const [header, payload, signature] = parts;
   const signingInput = `${header}.${payload}`;
-  const key = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(secret),
-    { name: "HMAC", hash: { name: "SHA-256" } },
-    false,
-    ["sign"]
-  );
+  const key = await getHmacKey(secret);
   const expected = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(signingInput));
   const expectedStr = base64UrlEncode(expected);
   if (!safeEqual(expectedStr, signature)) {
@@ -717,37 +727,58 @@ async function handleReportRoutes(request, env, path) {
         range === "month" ? "strftime('%Y-%m', date) = strftime('%Y-%m','now')" :
         range === "year" ? "strftime('%Y', date) = strftime('%Y','now')" : "1=1";
 
-      const totals = await queryOne(db, `
+      // All five dashboard queries run in a single D1 batch (1 network
+      // round-trip instead of 5 sequential ones). Results are in statement order.
+      const [totalsRes, expenseTotalsRes, unitsRes, recentPaymentsRes, latestExpensesRes] = await batch(db, [
+        {
+          sql: `
         SELECT
           COALESCE(SUM(CASE WHEN strftime('%Y-%m', payment_date) = strftime('%Y-%m','now') THEN amount_paid ELSE 0 END), 0) AS income_this_month,
           COALESCE(SUM(CASE WHEN payment_date = date('now') THEN amount_paid ELSE 0 END), 0) AS income_today,
           COALESCE(SUM(CASE WHEN ${incomeRangeCond} THEN amount_paid ELSE 0 END), 0) AS income_range
-        FROM payments WHERE owner_id = ?`, [ownerId]);
-
-      const expenseTotals = await queryOne(db, `
+        FROM payments WHERE owner_id = ?`,
+          params: [ownerId],
+        },
+        {
+          sql: `
         SELECT
           COALESCE(SUM(CASE WHEN strftime('%Y-%m', date) = strftime('%Y-%m','now') THEN amount ELSE 0 END), 0) AS expenses_this_month,
           COALESCE(SUM(CASE WHEN date = date('now') THEN amount ELSE 0 END), 0) AS expenses_today,
           COALESCE(SUM(CASE WHEN ${expenseRangeCond} THEN amount ELSE 0 END), 0) AS expenses_range
-        FROM expenses WHERE owner_id = ?`, [ownerId]);
-
-      const units = await queryOne(db, `
+        FROM expenses WHERE owner_id = ?`,
+          params: [ownerId],
+        },
+        {
+          sql: `
         SELECT COUNT(*) AS total, SUM(CASE WHEN status = 'Occupied' THEN 1 ELSE 0 END) AS occupied
-        FROM units WHERE owner_id = ?`, [ownerId]);
-
-      const recentPayments = await query(db, `
+        FROM units WHERE owner_id = ?`,
+          params: [ownerId],
+        },
+        {
+          sql: `
         SELECT p.*, t.name AS tenant_name
         FROM payments p LEFT JOIN tenants t ON t.id = p.tenant_id
         WHERE p.owner_id = ?
         ORDER BY (p.payment_date IS NULL), p.payment_date DESC, p.id DESC
-        LIMIT 5`, [ownerId]);
-
-      const latestExpenses = await query(db, `
+        LIMIT 5`,
+          params: [ownerId],
+        },
+        {
+          sql: `
         SELECT e.*, a.name AS apartment_name
         FROM expenses e LEFT JOIN apartments a ON a.id = e.apartment_id
         WHERE e.owner_id = ?
         ORDER BY (e.date IS NULL), e.date DESC, e.id DESC
-        LIMIT 5`, [ownerId]);
+        LIMIT 5`,
+          params: [ownerId],
+        },
+      ]);
+
+      const totals = totalsRes.rows[0] || {};
+      const expenseTotals = expenseTotalsRes.rows[0] || {};
+      const units = unitsRes.rows[0] || {};
+      const recentPayments = { rows: recentPaymentsRes.rows };
+      const latestExpenses = { rows: latestExpensesRes.rows };
 
       const incomeRange = Number(totals.income_range) || 0;
       const expensesRange = Number(expenseTotals.expenses_range) || 0;
@@ -779,8 +810,12 @@ async function handleReportRoutes(request, env, path) {
         const expenseParams = [ownerId];
         let expenseSql = `SELECT COALESCE(SUM(amount),0) AS value FROM expenses WHERE owner_id = ?`;
         if (apartmentId) { expenseSql += ` AND apartment_id = ?`; expenseParams.push(apartmentId); }
-        const income = await queryOne(db, incomeSql, incomeParams);
-        const expenses = await queryOne(db, expenseSql, expenseParams);
+        const [incomeRes, expensesRes] = await batch(db, [
+          { sql: incomeSql, params: incomeParams },
+          { sql: expenseSql, params: expenseParams },
+        ]);
+        const income = incomeRes.rows[0] || {};
+        const expenses = expensesRes.rows[0] || {};
         return jsonRes({ data: [{ label: "All Time", income: Number(income.value) || 0, expenses: Number(expenses.value) || 0 }] });
       }
 
@@ -796,8 +831,10 @@ async function handleReportRoutes(request, env, path) {
       if (apartmentId) { expenseSql += ` AND apartment_id = ?`; expenseParams.push(apartmentId); }
       expenseSql += ` GROUP BY label`;
 
-      const incomeResult = await query(db, incomeSql, incomeParams);
-      const expenseResult = await query(db, expenseSql, expenseParams);
+      const [incomeResult, expenseResult] = await batch(db, [
+        { sql: incomeSql, params: incomeParams },
+        { sql: expenseSql, params: expenseParams },
+      ]);
 
       const merged = new Map();
       for (const row of incomeResult.rows) {
@@ -886,8 +923,10 @@ async function handleReportRoutes(request, env, path) {
       let expenseSql = `SELECT DISTINCT strftime('%Y-%m', date) AS month FROM expenses WHERE owner_id = ? AND date IS NOT NULL`;
       if (apartmentId) { expenseSql += ` AND apartment_id = ?`; expenseParams.push(apartmentId); }
 
-      const paymentMonths = await query(db, paymentSql, paymentParams);
-      const expenseMonths = await query(db, expenseSql, expenseParams);
+      const [paymentMonths, expenseMonths] = await batch(db, [
+        { sql: paymentSql, params: paymentParams },
+        { sql: expenseSql, params: expenseParams },
+      ]);
       const months = Array.from(new Set([...paymentMonths.rows.map((r) => r.month), ...expenseMonths.rows.map((r) => r.month)])).sort().reverse();
       return jsonRes({ months });
     }
@@ -903,8 +942,10 @@ async function handleReportRoutes(request, env, path) {
       let expenseSql = `SELECT DISTINCT strftime('%Y', date) AS year FROM expenses WHERE owner_id = ? AND date IS NOT NULL`;
       if (apartmentId) { expenseSql += ` AND apartment_id = ?`; expenseParams.push(apartmentId); }
 
-      const paymentYears = await query(db, paymentSql, paymentParams);
-      const expenseYears = await query(db, expenseSql, expenseParams);
+      const [paymentYears, expenseYears] = await batch(db, [
+        { sql: paymentSql, params: paymentParams },
+        { sql: expenseSql, params: expenseParams },
+      ]);
       const years = Array.from(new Set([...paymentYears.rows.map((r) => r.year), ...expenseYears.rows.map((r) => r.year)])).sort().reverse();
       return jsonRes({ years });
     }
@@ -924,8 +965,12 @@ async function handleReportRoutes(request, env, path) {
       if (apartmentId) { expenseSql += ` AND apartment_id = ?`; expenseParams.push(apartmentId); }
       if (month) { expenseSql += ` AND strftime('%Y-%m', date) = ?`; expenseParams.push(month); }
 
-      const income = await queryOne(db, incomeSql, incomeParams);
-      const expenses = await queryOne(db, expenseSql, expenseParams);
+      const [incomeRes, expensesRes] = await batch(db, [
+        { sql: incomeSql, params: incomeParams },
+        { sql: expenseSql, params: expenseParams },
+      ]);
+      const income = incomeRes.rows[0] || {};
+      const expenses = expensesRes.rows[0] || {};
       const totalIncome = Number(income.income) || 0;
       const totalExpenses = Number(expenses.expenses) || 0;
 
@@ -952,8 +997,12 @@ async function handleReportRoutes(request, env, path) {
       let expenseSql = `SELECT COALESCE(SUM(amount),0) AS expenses FROM expenses WHERE owner_id = ? AND strftime('%Y', date) = ?`;
       if (apartmentId) { expenseSql += ` AND apartment_id = ?`; expenseParams.push(apartmentId); }
 
-      const income = await queryOne(db, incomeSql, incomeParams);
-      const expenses = await queryOne(db, expenseSql, expenseParams);
+      const [incomeRes, expensesRes] = await batch(db, [
+        { sql: incomeSql, params: incomeParams },
+        { sql: expenseSql, params: expenseParams },
+      ]);
+      const income = incomeRes.rows[0] || {};
+      const expenses = expensesRes.rows[0] || {};
       const totalIncome = Number(income.income) || 0;
       const totalExpenses = Number(expenses.expenses) || 0;
 
@@ -1012,13 +1061,27 @@ async function handleReportRoutes(request, env, path) {
         GROUP BY t.id, t.name, t.status, a.name, u.unit_number
         ORDER BY total_pending DESC`, [ownerId]);
 
-      // SQLite/D1 has no array_agg, so fetch each tenant's unpaid months separately.
-      const pending = [];
-      for (const row of result.rows) {
-        const months = await query(db, `
-          SELECT month FROM payments WHERE owner_id = ? AND tenant_id = ? AND balance > 0 ORDER BY month`, [ownerId, row.tenant_id]);
-        pending.push({ ...row, unpaid_month_list: months.rows.map((m) => m.month) });
+      // SQLite/D1 has no array_agg, so aggregate every tenant's unpaid months in
+      // ONE extra query with GROUP_CONCAT (was previously an N+1 loop that
+      // issued a separate query for every tenant).
+      const monthRows = await query(db, `
+        SELECT tenant_id, GROUP_CONCAT(month, ',') AS months
+        FROM (
+          SELECT tenant_id, month FROM payments
+          WHERE owner_id = ? AND balance > 0 AND tenant_id IS NOT NULL
+          ORDER BY month
+        )
+        GROUP BY tenant_id`, [ownerId]);
+
+      const monthMap = new Map();
+      for (const m of monthRows.rows) {
+        monthMap.set(String(m.tenant_id), m.months ? String(m.months).split(",") : []);
       }
+
+      const pending = result.rows.map((row) => ({
+        ...row,
+        unpaid_month_list: monthMap.get(String(row.tenant_id)) || [],
+      }));
       return jsonRes({ pending });
     }
 

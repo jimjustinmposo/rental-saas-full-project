@@ -117,6 +117,16 @@ CREATE INDEX IF NOT EXISTS idx_tenants_owner ON tenants(owner_id);
 CREATE INDEX IF NOT EXISTS idx_payments_owner ON payments(owner_id);
 CREATE INDEX IF NOT EXISTS idx_expenses_owner ON expenses(owner_id);
 CREATE INDEX IF NOT EXISTS idx_reports_owner ON monthly_reports(owner_id);
+CREATE INDEX IF NOT EXISTS idx_payments_owner_month ON payments(owner_id, month);
+CREATE INDEX IF NOT EXISTS idx_payments_owner_date ON payments(owner_id, payment_date);
+CREATE INDEX IF NOT EXISTS idx_payments_owner_tenant ON payments(owner_id, tenant_id);
+CREATE INDEX IF NOT EXISTS idx_payments_owner_balance ON payments(owner_id, balance);
+CREATE INDEX IF NOT EXISTS idx_payments_owner_apartment ON payments(owner_id, apartment_id);
+CREATE INDEX IF NOT EXISTS idx_expenses_owner_date ON expenses(owner_id, date);
+CREATE INDEX IF NOT EXISTS idx_expenses_owner_apartment ON expenses(owner_id, apartment_id);
+CREATE INDEX IF NOT EXISTS idx_units_owner_apartment ON units(owner_id, apartment_id);
+CREATE INDEX IF NOT EXISTS idx_tenants_owner_unit ON tenants(owner_id, unit_id);
+CREATE INDEX IF NOT EXISTS idx_reports_owner_month ON monthly_reports(owner_id, month);
 `;
 
 /**
@@ -243,10 +253,36 @@ async function initializeSchema(db) {
   }
 }
 
+/**
+ * Batch multiple statements in ONE D1 round-trip (executed transactionally).
+ * Each statement: { sql, params }. Results come back in the same order as the
+ * input — SELECTs as { rows }, writes as { changes }.
+ * This is a major latency win for dashboards/reports that run several queries
+ * at once (5 sequential network round-trips become 1).
+ */
+async function batch(db, statements) {
+  try {
+    const prepared = statements.map(({ sql, params = [] }) => db.prepare(sql).bind(...params));
+    const results = await db.batch(prepared);
+    return results.map((result, index) => {
+      if (!result.success) {
+        throw new Error(result.error || `D1 batch statement ${index} failed`);
+      }
+      return Array.isArray(result.results)
+        ? { rows: result.results }
+        : { changes: result.meta?.changes || 0 };
+    });
+  } catch (err) {
+    console.error("[db] Batch error:", err);
+    throw err;
+  }
+}
+
 module.exports = {
   query,
   queryOne,
   execute,
+  batch,
   transaction,
   initializeSchema,
 };

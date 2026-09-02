@@ -22,16 +22,22 @@ export default function DashboardPage() {
   const [apartments, setApartments] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  // The apartment list only needs to be fetched once per page visit — it does
+  // not change when the summary range (month/year/all) is switched, so it is
+  // kept in its own effect instead of being re-requested on every range change.
+  useEffect(() => {
+    apiClient
+      .get("/apartments")
+      .then((res) => setApartments(res.data))
+      .catch(() => {});
+  }, []);
+
   useEffect(() => {
     setLoading(true);
-    Promise.all([
-      apiClient.get("/reports/dashboard", { params: { range } }),
-      apiClient.get("/apartments"),
-    ])
-      .then(([reportRes, apartmentsRes]) => {
-        setSummary(reportRes.data);
-        setApartments(apartmentsRes.data);
-      })
+    apiClient
+      .get("/reports/dashboard", { params: { range } })
+      .then((res) => setSummary(res.data))
+      .catch(() => {})
       .finally(() => setLoading(false));
   }, [range]);
 

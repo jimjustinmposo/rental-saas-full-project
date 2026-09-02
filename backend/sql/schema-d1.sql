@@ -119,3 +119,18 @@ CREATE INDEX IF NOT EXISTS idx_tenants_owner ON tenants(owner_id);
 CREATE INDEX IF NOT EXISTS idx_payments_owner ON payments(owner_id);
 CREATE INDEX IF NOT EXISTS idx_expenses_owner ON expenses(owner_id);
 CREATE INDEX IF NOT EXISTS idx_reports_owner ON monthly_reports(owner_id);
+
+-- ============================================================
+-- PERFORMANCE INDEXES for report & dashboard queries
+-- Purely additive (IF NOT EXISTS) — no data or table changes.
+-- ============================================================
+CREATE INDEX IF NOT EXISTS idx_payments_owner_month ON payments(owner_id, month);
+CREATE INDEX IF NOT EXISTS idx_payments_owner_date ON payments(owner_id, payment_date);
+CREATE INDEX IF NOT EXISTS idx_payments_owner_tenant ON payments(owner_id, tenant_id);
+CREATE INDEX IF NOT EXISTS idx_payments_owner_balance ON payments(owner_id, balance);
+CREATE INDEX IF NOT EXISTS idx_payments_owner_apartment ON payments(owner_id, apartment_id);
+CREATE INDEX IF NOT EXISTS idx_expenses_owner_date ON expenses(owner_id, date);
+CREATE INDEX IF NOT EXISTS idx_expenses_owner_apartment ON expenses(owner_id, apartment_id);
+CREATE INDEX IF NOT EXISTS idx_units_owner_apartment ON units(owner_id, apartment_id);
+CREATE INDEX IF NOT EXISTS idx_tenants_owner_unit ON tenants(owner_id, unit_id);
+CREATE INDEX IF NOT EXISTS idx_reports_owner_month ON monthly_reports(owner_id, month);

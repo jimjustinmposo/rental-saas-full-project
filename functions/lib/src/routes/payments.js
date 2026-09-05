@@ -17,8 +17,14 @@ function computeStatus(amountDue, amountPaid) {
 // matters when a unit code gets reused by a new tenant later; each
 // payment always belongs to one specific tenant_id, so this is a safety
 // net against any payment ever being displayed against the wrong tenancy.
+// GET /api/payments?range=month|year|all
+// Optional range filter matches the dashboard income card exactly, so the
+// returned rows always sum to the amount shown on the card being clicked.
 router.get("/", async (req, res) => {
   try {
+    let rangeCond = "";
+    if (req.query.range === "month") rangeCond = " AND date_trunc('month', p.payment_date) = date_trunc('month', CURRENT_DATE)";
+    else if (req.query.range === "year") rangeCond = " AND date_trunc('year', p.payment_date) = date_trunc('year', CURRENT_DATE)";
     const result = await pool.query(
       `SELECT p.*, t.name AS tenant_name, u.unit_number, a.name AS apartment_name
        FROM payments p
@@ -28,6 +34,7 @@ router.get("/", async (req, res) => {
        WHERE p.owner_id = $1
          AND (t.move_in IS NULL OR to_date(p.month || '-01', 'YYYY-MM-DD') >= date_trunc('month', t.move_in))
          AND (t.move_out IS NULL OR to_date(p.month || '-01', 'YYYY-MM-DD') < date_trunc('month', t.move_out))
+         ${rangeCond}
        ORDER BY p.payment_date DESC NULLS LAST, p.id DESC`,
       [req.ownerId]
     );

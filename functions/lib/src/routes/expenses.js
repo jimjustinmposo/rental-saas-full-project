@@ -5,15 +5,21 @@ const { requireAuth } = require("../middleware/auth");
 const router = express.Router();
 router.use(requireAuth);
 
-// GET /api/expenses
+// GET /api/expenses?range=month|year|all
+// Optional range filter matches the dashboard expenses card exactly, so the
+// returned rows always sum to the amount shown on the card being clicked.
 router.get("/", async (req, res) => {
   try {
+    let rangeCond = "";
+    if (req.query.range === "month") rangeCond = " AND date_trunc('month', e.date) = date_trunc('month', CURRENT_DATE)";
+    else if (req.query.range === "year") rangeCond = " AND date_trunc('year', e.date) = date_trunc('year', CURRENT_DATE)";
     const result = await pool.query(
       `SELECT e.*, a.name AS apartment_name, u.unit_number
        FROM expenses e
        LEFT JOIN apartments a ON a.id = e.apartment_id
        LEFT JOIN units u ON u.id = e.unit_id
        WHERE e.owner_id = $1
+         ${rangeCond}
        ORDER BY e.date DESC NULLS LAST, e.id DESC`,
       [req.ownerId]
     );

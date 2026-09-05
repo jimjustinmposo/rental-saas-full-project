@@ -564,10 +564,16 @@ async function handlePaymentRoutes(request, env, path) {
         if (!result) return new Response(JSON.stringify({ error: "Not found" }), { status: 404, headers: { "Content-Type": "application/json" } });
         return new Response(JSON.stringify(result), { status: 200, headers: { "Content-Type": "application/json" } });
       }
+      // Optional ?range=month|year|all — same date conditions as the dashboard
+      // income card, so the returned rows always sum to its displayed amount.
+      const rangeParam = new URL(request.url).searchParams.get("range");
+      let rangeCond = "";
+      if (rangeParam === "month") rangeCond = " AND strftime('%Y-%m', p.payment_date) = strftime('%Y-%m','now')";
+      else if (rangeParam === "year") rangeCond = " AND strftime('%Y', p.payment_date) = strftime('%Y','now')";
       const result = await query(db, `SELECT p.*, t.name AS tenant_name, u.unit_number, a.name AS apartment_name
         FROM payments p LEFT JOIN tenants t ON t.id = p.tenant_id LEFT JOIN units u ON u.id = p.unit_id LEFT JOIN apartments a ON a.id = p.apartment_id
         WHERE p.owner_id = ? AND (t.move_in IS NULL OR date(p.month || '-01') >= date(t.move_in))
-          AND (t.move_out IS NULL OR date(p.month || '-01') < date(t.move_out))
+          AND (t.move_out IS NULL OR date(p.month || '-01') < date(t.move_out))${rangeCond}
         ORDER BY p.payment_date DESC NULLS LAST, p.id DESC`, [ownerId]);
       return new Response(JSON.stringify(result.rows), { status: 200, headers: { "Content-Type": "application/json" } });
     }
@@ -650,9 +656,15 @@ async function handleExpenseRoutes(request, env, path) {
         if (!result) return new Response(JSON.stringify({ error: "Not found" }), { status: 404, headers: { "Content-Type": "application/json" } });
         return new Response(JSON.stringify(result), { status: 200, headers: { "Content-Type": "application/json" } });
       }
+      // Optional ?range=month|year|all — same date conditions as the dashboard
+      // expenses card, so the returned rows always sum to its displayed amount.
+      const rangeParam = new URL(request.url).searchParams.get("range");
+      let rangeCond = "";
+      if (rangeParam === "month") rangeCond = " AND strftime('%Y-%m', e.date) = strftime('%Y-%m','now')";
+      else if (rangeParam === "year") rangeCond = " AND strftime('%Y', e.date) = strftime('%Y','now')";
       const result = await query(db, `SELECT e.*, a.name AS apartment_name, u.unit_number FROM expenses e
         LEFT JOIN apartments a ON a.id = e.apartment_id LEFT JOIN units u ON u.id = e.unit_id
-        WHERE e.owner_id = ? ORDER BY e.date DESC, e.id DESC`, [ownerId]);
+        WHERE e.owner_id = ?${rangeCond} ORDER BY e.date DESC, e.id DESC`, [ownerId]);
       return new Response(JSON.stringify(result.rows), { status: 200, headers: { "Content-Type": "application/json" } });
     }
 

@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useMemo } from "react";
+import { useSearchParams } from "react-router-dom";
 import apiClient from "../api/apiClient";
 import { useSortableData } from "../hooks/useSortableData";
 import { useAuth } from "../api/AuthContext";
@@ -7,9 +8,18 @@ import SearchableSelect from "../components/SearchableSelect";
 
 const emptyForm = { apartment_id: "", description: "", amount: "", date: "" };
 
+const RANGE_OPTIONS = [
+  { value: "all", label: "All Time" },
+  { value: "month", label: "This Month" },
+  { value: "year", label: "This Year" },
+];
+
+const RANGE_LABEL = { month: "This month", year: "This year", all: "All time" };
+
 export default function ExpensesPage() {
   const { owner } = useAuth();
   const currency = owner?.currency || "USD";
+  const [searchParams, setSearchParams] = useSearchParams();
   const [expenses, setExpenses] = useState([]);
   const [apartments, setApartments] = useState([]);
   const [showForm, setShowForm] = useState(false);
@@ -18,14 +28,33 @@ export default function ExpensesPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
 
+  // Date-range filter, synced with the ?range= URL param. Clicking the
+  // dashboard's Total Expenses card lands here pre-filtered so the table
+  // shows exactly the records that make up the clicked amount.
+  const range = searchParams.get("range") || "all";
+
+  const setRange = (value) => {
+    const next = new URLSearchParams(searchParams);
+    if (value === "all") next.delete("range");
+    else next.set("range", value);
+    setSearchParams(next, { replace: true });
+  };
+
   const load = () => {
-    Promise.all([apiClient.get("/expenses"), apiClient.get("/apartments")]).then(([e, a]) => {
+    setLoading(true);
+    Promise.all([
+      apiClient.get("/expenses", { params: range !== "all" ? { range } : undefined }),
+      apiClient.get("/apartments"),
+    ]).then(([e, a]) => {
       setExpenses(e.data);
       setApartments(a.data);
     }).finally(() => setLoading(false));
   };
 
-  useEffect(load, []);
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [range]);
 
   const resetForm = () => {
     setForm(emptyForm);
@@ -72,18 +101,36 @@ export default function ExpensesPage() {
     );
   }, [expenses, search]);
 
+  const expenseTotal = useMemo(
+    () => filteredExpenses.reduce((sum, e) => sum + Number(e.amount || 0), 0),
+    [filteredExpenses]
+  );
+
   const { sortedItems, requestSort, sortIndicator } = useSortableData(filteredExpenses);
 
   return (
     <div>
       <div className="page-header">
         <h1>Expenses</h1>
-        <button
-          className="btn btn-primary"
-          onClick={() => (showForm ? resetForm() : setShowForm(true))}
-        >
-          {showForm ? "Cancel" : "+ Add Expense"}
-        </button>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <select
+            className="input-field"
+            style={{ width: "auto", padding: "8px 10px" }}
+            value={range}
+            onChange={(e) => setRange(e.target.value)}
+            title="Filter expenses by date range"
+          >
+            {RANGE_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+          <button
+            className="btn btn-primary"
+            onClick={() => (showForm ? resetForm() : setShowForm(true))}
+          >
+            {showForm ? "Cancel" : "+ Add Expense"}
+          </button>
+        </div>
       </div>
 
       {showForm && (
@@ -143,6 +190,19 @@ export default function ExpensesPage() {
           onChange={(e) => setSearch(e.target.value)}
         />
       </div>
+
+      {range !== "all" && (
+        <div
+          style={{
+            marginBottom: 16,
+            fontSize: 13.5,
+            color: "var(--color-text-muted)",
+          }}
+        >
+          {RANGE_LABEL[range]} · {filteredExpenses.length} expense{filteredExpenses.length !== 1 ? "s" : ""} · total{" "}
+          <strong style={{ color: "var(--color-text)" }}>{formatMoney(expenseTotal, currency)}</strong>
+        </div>
+      )}
 
       <div className="card">
         {loading ? (

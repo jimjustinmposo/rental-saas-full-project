@@ -33,15 +33,15 @@ export default function SummaryCards({ summary }) {
       <Card
         label="Total Income"
         value={formatMoney(summary.totalIncome, currency)}
-        sublabel={`${rangeLabel} · view payments`}
-        onClick={() => navigate("/payments")}
+        sublabel={`${rangeLabel} · view the records`}
+        onClick={() => navigate(`/payments?range=${summary.range}`)}
       />
       <Card
         label="Total Expenses"
         value={formatMoney(summary.totalExpenses, currency)}
-        sublabel={`${rangeLabel} · view expenses`}
+        sublabel={`${rangeLabel} · view the records`}
         tone="danger"
-        onClick={() => navigate("/expenses")}
+        onClick={() => navigate(`/expenses?range=${summary.range}`)}
       />
       <Card
         label="Net Profit"
@@ -59,16 +59,16 @@ export default function SummaryCards({ summary }) {
       <Card
         label="Paid — This Month"
         value={`${summary.paidCount ?? 0} paid`}
-        sublabel={`${formatMoney(summary.paidAmount ?? 0, currency)} collected this month · view payments`}
+        sublabel={`${formatMoney(summary.paidAmount ?? 0, currency)} collected this month · view the records`}
         tone="success"
-        onClick={() => navigate("/payments")}
+        onClick={() => navigate("/payments?range=month")}
       />
       <Card
         label="Not Paid — This Month"
         value={`${summary.pendingCount ?? 0} unpaid`}
         sublabel={`${formatMoney(summary.pendingAmount ?? 0, currency)} pending this month · view payments`}
         tone="danger"
-        onClick={() => navigate("/payments")}
+        onClick={() => navigate("/payments?range=month")}
       />
     </div>
   );

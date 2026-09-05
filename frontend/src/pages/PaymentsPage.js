@@ -18,10 +18,18 @@ const emptyForm = {
   note: "",
 };
 
+const RANGE_OPTIONS = [
+  { value: "all", label: "All Time" },
+  { value: "month", label: "This Month" },
+  { value: "year", label: "This Year" },
+];
+
+const RANGE_LABEL = { month: "This month", year: "This year", all: "All time" };
+
 export default function PaymentsPage() {
   const { owner } = useAuth();
   const currency = owner?.currency || "USD";
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [payments, setPayments] = useState([]);
   const [tenants, setTenants] = useState([]);
   const [showForm, setShowForm] = useState(false);
@@ -31,14 +39,33 @@ export default function PaymentsPage() {
   const [search, setSearch] = useState(searchParams.get("tenant") || "");
   const [monthError, setMonthError] = useState("");
 
+  // Date-range filter, synced with the ?range= URL param. Clicking the
+  // dashboard's Total Income / Paid cards lands here pre-filtered so the
+  // table shows exactly the records that make up the clicked amount.
+  const range = searchParams.get("range") || "all";
+
+  const setRange = (value) => {
+    const next = new URLSearchParams(searchParams);
+    if (value === "all") next.delete("range");
+    else next.set("range", value);
+    setSearchParams(next, { replace: true });
+  };
+
   const load = () => {
-    Promise.all([apiClient.get("/payments"), apiClient.get("/tenants")]).then(([p, t]) => {
+    setLoading(true);
+    Promise.all([
+      apiClient.get("/payments", { params: range !== "all" ? { range } : undefined }),
+      apiClient.get("/tenants"),
+    ]).then(([p, t]) => {
       setPayments(p.data);
       setTenants(t.data);
     }).finally(() => setLoading(false));
   };
 
-  useEffect(load, []);
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [range]);
 
   const resetForm = () => {
     setForm(emptyForm);
@@ -128,21 +155,38 @@ export default function PaymentsPage() {
 
   const { sortedItems, requestSort, sortIndicator } = useSortableData(filteredPayments);
 
-  const tenantTotal = useMemo(() => {
-    if (!search.trim()) return null;
+  // Shows the running total whenever a date range or a search is active —
+  // e.g. landing from the dashboard's Total Income card with ?range=month,
+  // the sum below always equals the amount on the card that was clicked.
+  const rangeActive = range !== "all" || !!search.trim();
+  const visibleTotal = useMemo(() => {
+    if (!rangeActive) return null;
     return filteredPayments.reduce((sum, p) => sum + Number(p.amount_paid || 0), 0);
-  }, [filteredPayments, search]);
+  }, [filteredPayments, rangeActive]);
 
   return (
     <div>
       <div className="page-header">
         <h1>Payments</h1>
-        <button
-          className="btn btn-primary"
-          onClick={() => (showForm ? resetForm() : setShowForm(true))}
-        >
-          {showForm ? "Cancel" : "+ Record Payment"}
-        </button>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <select
+            className="input-field"
+            style={{ width: "auto", padding: "8px 10px" }}
+            value={range}
+            onChange={(e) => setRange(e.target.value)}
+            title="Filter payments by date range"
+          >
+            {RANGE_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+          <button
+            className="btn btn-primary"
+            onClick={() => (showForm ? resetForm() : setShowForm(true))}
+          >
+            {showForm ? "Cancel" : "+ Record Payment"}
+          </button>
+        </div>
       </div>
 
       {showForm && (
@@ -237,7 +281,7 @@ export default function PaymentsPage() {
         />
       </div>
 
-      {tenantTotal !== null && (
+      {visibleTotal !== null && (
         <div
           style={{
             marginBottom: 16,
@@ -245,8 +289,8 @@ export default function PaymentsPage() {
             color: "var(--color-text-muted)",
           }}
         >
-          {filteredPayments.length} matching record{filteredPayments.length !== 1 ? "s" : ""} · total paid{" "}
-          <strong style={{ color: "var(--color-text)" }}>{formatMoney(tenantTotal, currency)}</strong>
+          {RANGE_LABEL[range]} · {filteredPayments.length} record{filteredPayments.length !== 1 ? "s" : ""} · total paid{" "}
+          <strong style={{ color: "var(--color-text)" }}>{formatMoney(visibleTotal, currency)}</strong>
         </div>
       )}
 

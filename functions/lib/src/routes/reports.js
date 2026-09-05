@@ -28,93 +28,102 @@ router.get("/dashboard", async (req, res) => {
     }
     // range === "all" -> TRUE, no date filter at all
 
-    const totals = await pool.query(
-      `SELECT
-         COALESCE(SUM(amount_paid) FILTER (WHERE date_trunc('month', payment_date) = date_trunc('month', CURRENT_DATE)), 0) AS income_this_month,
-         COALESCE(SUM(amount_paid) FILTER (WHERE payment_date = CURRENT_DATE), 0) AS income_today,
-         COALESCE(SUM(amount_paid) FILTER (WHERE ${incomeCondition}), 0) AS income_range
-       FROM payments WHERE owner_id = $1`,
-      [ownerId]
-    );
-
-    const expenseTotals = await pool.query(
-      `SELECT
-         COALESCE(SUM(amount) FILTER (WHERE date_trunc('month', date) = date_trunc('month', CURRENT_DATE)), 0) AS expenses_this_month,
-         COALESCE(SUM(amount) FILTER (WHERE date = CURRENT_DATE), 0) AS expenses_today,
-         COALESCE(SUM(amount) FILTER (WHERE ${expenseCondition}), 0) AS expenses_range
-       FROM expenses WHERE owner_id = $1`,
-      [ownerId]
-    );
-
-    const units = await pool.query(
-      `SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE status = 'Occupied') AS occupied
-       FROM units WHERE owner_id = $1`,
-      [ownerId]
-    );
-
-    const monthlyTrend = await pool.query(
-      `SELECT to_char(month_start, 'Mon') AS label,
-              income, expenses
-       FROM (
-         SELECT date_trunc('month', payment_date) AS month_start,
-                SUM(amount_paid) AS income
-         FROM payments WHERE owner_id = $1 AND payment_date IS NOT NULL
-         GROUP BY 1
-       ) i
-       FULL OUTER JOIN (
-         SELECT date_trunc('month', date) AS month_start,
-                SUM(amount) AS expenses
-         FROM expenses WHERE owner_id = $1 AND date IS NOT NULL
-         GROUP BY 1
-       ) e USING (month_start)
-       ORDER BY month_start DESC
-       LIMIT 6`,
-      [ownerId]
-    );
-
-    const recentPayments = await pool.query(
-      `SELECT p.*, t.name AS tenant_name
-       FROM payments p LEFT JOIN tenants t ON t.id = p.tenant_id
-       WHERE p.owner_id = $1
-       ORDER BY p.payment_date DESC NULLS LAST, p.id DESC LIMIT 5`,
-      [ownerId]
-    );
-
-    const latestExpenses = await pool.query(
-      `SELECT e.*, a.name AS apartment_name
-       FROM expenses e LEFT JOIN apartments a ON a.id = e.apartment_id
-       WHERE e.owner_id = $1
-       ORDER BY e.date DESC NULLS LAST, e.id DESC LIMIT 5`,
-      [ownerId]
-    );
-
-    // Paid / Not-paid summary for the CURRENT month only — independent of the
-    // range selector so the top dashboard cards always reflect the month at hand.
-    const paidSummary = await pool.query(
-      `SELECT COUNT(*) AS paid_count,
-              COALESCE(SUM(amount_paid), 0) AS paid_amount
-       FROM payments
-       WHERE owner_id = $1 AND month = to_char(CURRENT_DATE, 'YYYY-MM') AND status = 'Paid'`,
-      [ownerId]
-    );
-
-    const pendingSummary = await pool.query(
-      `SELECT COUNT(*) AS pending_count,
-              COALESCE(SUM(pending_amount), 0) AS pending_amount
-       FROM (
-         SELECT t.id,
-                CASE WHEN p.id IS NOT NULL THEN p.balance
-                     ELSE COALESCE(u.current_rent, 0) END AS pending_amount
-         FROM tenants t
-         JOIN units u ON u.id = t.unit_id AND u.owner_id = t.owner_id
-         LEFT JOIN payments p ON p.tenant_id = t.id AND p.owner_id = t.owner_id
-           AND p.month = to_char(CURRENT_DATE, 'YYYY-MM')
-         WHERE t.owner_id = $1 AND t.status = 'Active'
-           AND (p.id IS NULL OR (p.status != 'Paid' AND p.balance > 0))
-       ) unpaid
-       WHERE pending_amount > 0`,
-      [ownerId]
-    );
+    // All dashboard queries are independent, so run them concurrently —
+    // 8 sequential round-trips become one. (The D1/Cloudflare build of the
+    // same endpoint already does this via batch().)
+    const [
+      totals,
+      expenseTotals,
+      units,
+      monthlyTrend,
+      recentPayments,
+      latestExpenses,
+      paidSummary,
+      pendingSummary,
+    ] = await Promise.all([
+      pool.query(
+        `SELECT
+           COALESCE(SUM(amount_paid) FILTER (WHERE date_trunc('month', payment_date) = date_trunc('month', CURRENT_DATE)), 0) AS income_this_month,
+           COALESCE(SUM(amount_paid) FILTER (WHERE payment_date = CURRENT_DATE), 0) AS income_today,
+           COALESCE(SUM(amount_paid) FILTER (WHERE ${incomeCondition}), 0) AS income_range
+         FROM payments WHERE owner_id = $1`,
+        [ownerId]
+      ),
+      pool.query(
+        `SELECT
+           COALESCE(SUM(amount) FILTER (WHERE date_trunc('month', date) = date_trunc('month', CURRENT_DATE)), 0) AS expenses_this_month,
+           COALESCE(SUM(amount) FILTER (WHERE date = CURRENT_DATE), 0) AS expenses_today,
+           COALESCE(SUM(amount) FILTER (WHERE ${expenseCondition}), 0) AS expenses_range
+         FROM expenses WHERE owner_id = $1`,
+        [ownerId]
+      ),
+      pool.query(
+        `SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE status = 'Occupied') AS occupied
+         FROM units WHERE owner_id = $1`,
+        [ownerId]
+      ),
+      pool.query(
+        `SELECT to_char(month_start, 'Mon') AS label,
+                income, expenses
+         FROM (
+           SELECT date_trunc('month', payment_date) AS month_start,
+                  SUM(amount_paid) AS income
+           FROM payments WHERE owner_id = $1 AND payment_date IS NOT NULL
+           GROUP BY 1
+         ) i
+         FULL OUTER JOIN (
+           SELECT date_trunc('month', date) AS month_start,
+                  SUM(amount) AS expenses
+           FROM expenses WHERE owner_id = $1 AND date IS NOT NULL
+           GROUP BY 1
+         ) e USING (month_start)
+         ORDER BY month_start DESC
+         LIMIT 6`,
+        [ownerId]
+      ),
+      pool.query(
+        `SELECT p.*, t.name AS tenant_name
+         FROM payments p LEFT JOIN tenants t ON t.id = p.tenant_id
+         WHERE p.owner_id = $1
+         ORDER BY p.payment_date DESC NULLS LAST, p.id DESC LIMIT 5`,
+        [ownerId]
+      ),
+      pool.query(
+        `SELECT e.*, a.name AS apartment_name
+         FROM expenses e LEFT JOIN apartments a ON a.id = e.apartment_id
+         WHERE e.owner_id = $1
+         ORDER BY e.date DESC NULLS LAST, e.id DESC LIMIT 5`,
+        [ownerId]
+      ),
+      // Paid summary for the CURRENT month only — independent of the range
+      // selector so the top dashboard card always reflects the month at hand.
+      pool.query(
+        `SELECT COUNT(*) AS paid_count,
+                COALESCE(SUM(amount_paid), 0) AS paid_amount
+         FROM payments
+         WHERE owner_id = $1 AND month = to_char(CURRENT_DATE, 'YYYY-MM') AND status = 'Paid'`,
+        [ownerId]
+      ),
+      // Not-paid summary for the CURRENT month: active tenants without a Paid
+      // record this month (partial payers contribute their remaining balance).
+      pool.query(
+        `SELECT COUNT(*) AS pending_count,
+                COALESCE(SUM(pending_amount), 0) AS pending_amount
+         FROM (
+           SELECT t.id,
+                  CASE WHEN p.id IS NOT NULL THEN p.balance
+                       ELSE COALESCE(u.current_rent, 0) END AS pending_amount
+           FROM tenants t
+           JOIN units u ON u.id = t.unit_id AND u.owner_id = t.owner_id
+           LEFT JOIN payments p ON p.tenant_id = t.id AND p.owner_id = t.owner_id
+             AND p.month = to_char(CURRENT_DATE, 'YYYY-MM')
+           WHERE t.owner_id = $1 AND t.status = 'Active'
+             AND (p.id IS NULL OR (p.status != 'Paid' AND p.balance > 0))
+         ) unpaid
+         WHERE pending_amount > 0`,
+        [ownerId]
+      ),
+    ]);
 
     const incomeRange = Number(totals.rows[0].income_range);
     const expensesRange = Number(expenseTotals.rows[0].expenses_range);

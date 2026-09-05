@@ -727,9 +727,9 @@ async function handleReportRoutes(request, env, path) {
         range === "month" ? "strftime('%Y-%m', date) = strftime('%Y-%m','now')" :
         range === "year" ? "strftime('%Y', date) = strftime('%Y','now')" : "1=1";
 
-      // All five dashboard queries run in a single D1 batch (1 network
-      // round-trip instead of 5 sequential ones). Results are in statement order.
-      const [totalsRes, expenseTotalsRes, unitsRes, recentPaymentsRes, latestExpensesRes] = await batch(db, [
+      // All seven dashboard queries run in a single D1 batch (1 network
+      // round-trip instead of 7 sequential ones). Results are in statement order.
+      const [totalsRes, expenseTotalsRes, unitsRes, recentPaymentsRes, latestExpensesRes, paidSummaryRes, pendingSummaryRes] = await batch(db, [
         {
           sql: `
         SELECT
@@ -772,6 +772,36 @@ async function handleReportRoutes(request, env, path) {
         LIMIT 5`,
           params: [ownerId],
         },
+        {
+          // Current-month PAID summary: tenant-months fully paid this month.
+          sql: `
+        SELECT COUNT(*) AS paid_count,
+               COALESCE(SUM(amount_paid), 0) AS paid_amount
+        FROM payments
+        WHERE owner_id = ? AND month = strftime('%Y-%m','now') AND status = 'Paid'`,
+          params: [ownerId],
+        },
+        {
+          // Current-month NOT-PAID summary: active tenants without a Paid record
+          // this month. For partial payers the remaining balance is used, for
+          // tenants with no record at all the unit's current rent is used.
+          sql: `
+        SELECT COUNT(*) AS pending_count,
+               COALESCE(SUM(pending_amount), 0) AS pending_amount
+        FROM (
+          SELECT t.id AS tenant_id,
+                 CASE WHEN p.id IS NOT NULL THEN p.balance
+                      ELSE COALESCE(u.current_rent, 0) END AS pending_amount
+          FROM tenants t
+          JOIN units u ON u.id = t.unit_id AND u.owner_id = t.owner_id
+          LEFT JOIN payments p ON p.tenant_id = t.id AND p.owner_id = t.owner_id
+            AND p.month = strftime('%Y-%m','now')
+          WHERE t.owner_id = ? AND t.status = 'Active'
+            AND (p.id IS NULL OR (p.status != 'Paid' AND p.balance > 0))
+        )
+        WHERE pending_amount > 0`,
+          params: [ownerId],
+        },
       ]);
 
       const totals = totalsRes.rows[0] || {};
@@ -779,6 +809,8 @@ async function handleReportRoutes(request, env, path) {
       const units = unitsRes.rows[0] || {};
       const recentPayments = { rows: recentPaymentsRes.rows };
       const latestExpenses = { rows: latestExpensesRes.rows };
+      const paidSummary = paidSummaryRes.rows[0] || {};
+      const pendingSummary = pendingSummaryRes.rows[0] || {};
 
       const incomeRange = Number(totals.income_range) || 0;
       const expensesRange = Number(expenseTotals.expenses_range) || 0;
@@ -792,6 +824,10 @@ async function handleReportRoutes(request, env, path) {
         expensesToday: Number(expenseTotals.expenses_today) || 0,
         occupiedUnits: Number(units.occupied) || 0,
         totalUnits: Number(units.total) || 0,
+        paidCount: Number(paidSummary.paid_count) || 0,
+        paidAmount: Number(paidSummary.paid_amount) || 0,
+        pendingCount: Number(pendingSummary.pending_count) || 0,
+        pendingAmount: Number(pendingSummary.pending_amount) || 0,
         recentPayments: recentPayments.rows,
         latestExpenses: latestExpenses.rows,
       });

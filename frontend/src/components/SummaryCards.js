@@ -56,6 +56,20 @@ export default function SummaryCards({ summary }) {
         sublabel={`${occupancyPct}% occupied · view units`}
         onClick={() => navigate("/units")}
       />
+      <Card
+        label="Paid — This Month"
+        value={`${summary.paidCount ?? 0} paid`}
+        sublabel={`${formatMoney(summary.paidAmount ?? 0, currency)} collected this month · view payments`}
+        tone="success"
+        onClick={() => navigate("/payments")}
+      />
+      <Card
+        label="Not Paid — This Month"
+        value={`${summary.pendingCount ?? 0} unpaid`}
+        sublabel={`${formatMoney(summary.pendingAmount ?? 0, currency)} pending this month · view payments`}
+        tone="danger"
+        onClick={() => navigate("/payments")}
+      />
     </div>
   );
 }

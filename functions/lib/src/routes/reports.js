@@ -88,6 +88,34 @@ router.get("/dashboard", async (req, res) => {
       [ownerId]
     );
 
+    // Paid / Not-paid summary for the CURRENT month only — independent of the
+    // range selector so the top dashboard cards always reflect the month at hand.
+    const paidSummary = await pool.query(
+      `SELECT COUNT(*) AS paid_count,
+              COALESCE(SUM(amount_paid), 0) AS paid_amount
+       FROM payments
+       WHERE owner_id = $1 AND month = to_char(CURRENT_DATE, 'YYYY-MM') AND status = 'Paid'`,
+      [ownerId]
+    );
+
+    const pendingSummary = await pool.query(
+      `SELECT COUNT(*) AS pending_count,
+              COALESCE(SUM(pending_amount), 0) AS pending_amount
+       FROM (
+         SELECT t.id,
+                CASE WHEN p.id IS NOT NULL THEN p.balance
+                     ELSE COALESCE(u.current_rent, 0) END AS pending_amount
+         FROM tenants t
+         JOIN units u ON u.id = t.unit_id AND u.owner_id = t.owner_id
+         LEFT JOIN payments p ON p.tenant_id = t.id AND p.owner_id = t.owner_id
+           AND p.month = to_char(CURRENT_DATE, 'YYYY-MM')
+         WHERE t.owner_id = $1 AND t.status = 'Active'
+           AND (p.id IS NULL OR (p.status != 'Paid' AND p.balance > 0))
+       ) unpaid
+       WHERE pending_amount > 0`,
+      [ownerId]
+    );
+
     const incomeRange = Number(totals.rows[0].income_range);
     const expensesRange = Number(expenseTotals.rows[0].expenses_range);
 
@@ -100,6 +128,10 @@ router.get("/dashboard", async (req, res) => {
       expensesToday: Number(expenseTotals.rows[0].expenses_today),
       occupiedUnits: Number(units.rows[0].occupied),
       totalUnits: Number(units.rows[0].total),
+      paidCount: Number(paidSummary.rows[0].paid_count),
+      paidAmount: Number(paidSummary.rows[0].paid_amount),
+      pendingCount: Number(pendingSummary.rows[0].pending_count),
+      pendingAmount: Number(pendingSummary.rows[0].pending_amount),
       monthlyTrend: monthlyTrend.rows.reverse(),
       recentPayments: recentPayments.rows,
       latestExpenses: latestExpenses.rows,

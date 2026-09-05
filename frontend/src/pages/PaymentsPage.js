@@ -1,10 +1,10 @@
 import React, { useEffect, useState, useMemo } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import apiClient from "../api/apiClient";
 import { useSortableData } from "../hooks/useSortableData";
 import { useAuth } from "../api/AuthContext";
 import { formatMoney } from "../utils/currency";
-import { formatMonthLabel, parseMonthInput, MONTH_INPUT_EXAMPLE, MONTH_INPUT_ERROR } from "../utils/month";
+import { formatMonthLabel, parseMonthInput, currentMonthValue, MONTH_INPUT_EXAMPLE, MONTH_INPUT_ERROR } from "../utils/month";
 import SearchableSelect from "../components/SearchableSelect";
 
 const emptyForm = {
@@ -38,11 +38,24 @@ export default function PaymentsPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState(searchParams.get("tenant") || "");
   const [monthError, setMonthError] = useState("");
+  const [pendingList, setPendingList] = useState([]);
+  const navigate = useNavigate();
 
   // Date-range filter, synced with the ?range= URL param. Clicking the
   // dashboard's Total Income / Paid cards lands here pre-filtered so the
   // table shows exactly the records that make up the clicked amount.
   const range = searchParams.get("range") || "all";
+
+  // ?pending=1 -> "Not Paid — This Month" drill-down: shows every active tenant
+  // still owing for the current month with their exact outstanding amount.
+  const pendingMode = searchParams.get("pending") === "1";
+  // ?unpaid=1 -> "Pending Payments" drill-down: restrict the table to records
+  // with an outstanding balance (the total line below equals the row clicked).
+  const unpaidOnly = searchParams.get("unpaid") === "1";
+  // ?tenant_id= -> restrict to a single tenant. Uses the id (not the name) so
+  // it survives same-route navigations without remounting the page.
+  const tenantIdFilter = searchParams.get("tenant_id") || "";
+  const pendingMonth = currentMonthValue();
 
   const setRange = (value) => {
     const next = new URLSearchParams(searchParams);
@@ -53,6 +66,14 @@ export default function PaymentsPage() {
 
   const load = () => {
     setLoading(true);
+    if (pendingMode) {
+      apiClient
+        .get("/reports/pending", { params: { month: pendingMonth } })
+        .then((res) => setPendingList(res.data.pending || []))
+        .catch(() => setPendingList([]))
+        .finally(() => setLoading(false));
+      return;
+    }
     Promise.all([
       apiClient.get("/payments", { params: range !== "all" ? { range } : undefined }),
       apiClient.get("/tenants"),
@@ -65,7 +86,7 @@ export default function PaymentsPage() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [range]);
+  }, [range, pendingMode]);
 
   const resetForm = () => {
     setForm(emptyForm);
@@ -139,47 +160,71 @@ export default function PaymentsPage() {
 
   // Search matches tenant name, or the formatted month label — so "show
   // all payments for a particular tenant" is just typing their name here.
+  // When landed from the Pending Payments card (?tenant_id=…&unpaid=1) the
+  // list restricts to that single tenant and only rows with an outstanding
+  // balance, so the total line below equals the amount on the row clicked.
   const filteredPayments = useMemo(() => {
-    if (!search.trim()) return payments;
-    const q = search.toLowerCase();
-    return payments.filter(
-      (p) =>
-        p.tenant_name?.toLowerCase().includes(q) ||
-        p.apartment_name?.toLowerCase().includes(q) ||
-        p.unit_number?.toLowerCase().includes(q) ||
-        p.month?.toLowerCase().includes(q) ||
-        formatMonthLabel(p.month).toLowerCase().includes(q) ||
-        p.note?.toLowerCase().includes(q)
-    );
-  }, [payments, search]);
+    let rows = payments;
+    if (tenantIdFilter) {
+      rows = rows.filter((p) => String(p.tenant_id) === String(tenantIdFilter));
+    }
+    const q = search.trim().toLowerCase();
+    if (q) {
+      rows = rows.filter(
+        (p) =>
+          p.tenant_name?.toLowerCase().includes(q) ||
+          p.apartment_name?.toLowerCase().includes(q) ||
+          p.unit_number?.toLowerCase().includes(q) ||
+          p.month?.toLowerCase().includes(q) ||
+          formatMonthLabel(p.month).toLowerCase().includes(q) ||
+          p.note?.toLowerCase().includes(q)
+      );
+    }
+    if (unpaidOnly) {
+      rows = rows.filter((p) => Number(p.balance || 0) > 0);
+    }
+    return rows;
+  }, [payments, search, unpaidOnly, tenantIdFilter]);
 
   const { sortedItems, requestSort, sortIndicator } = useSortableData(filteredPayments);
 
-  // Shows the running total whenever a date range or a search is active —
-  // e.g. landing from the dashboard's Total Income card with ?range=month,
-  // the sum below always equals the amount on the card that was clicked.
-  const rangeActive = range !== "all" || !!search.trim();
+  // Shows the running total whenever a date range, the unpaid filter, or a
+  // search is active — e.g. landing from the dashboard cards with ?range=…
+  // or ?unpaid=1, the sum below always equals the amount on the card clicked.
+  const rangeActive = unpaidOnly || range !== "all" || !!search.trim();
   const visibleTotal = useMemo(() => {
     if (!rangeActive) return null;
-    return filteredPayments.reduce((sum, p) => sum + Number(p.amount_paid || 0), 0);
-  }, [filteredPayments, rangeActive]);
+    return filteredPayments.reduce(
+      (sum, p) => sum + Number(unpaidOnly ? p.balance : p.amount_paid || 0),
+      0
+    );
+  }, [filteredPayments, rangeActive, unpaidOnly]);
+
+  const pendingTotal = useMemo(
+    () => pendingList.reduce((sum, t) => sum + Number(t.pending_amount || 0), 0),
+    [pendingList]
+  );
 
   return (
     <div>
       <div className="page-header">
         <h1>Payments</h1>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          <select
-            className="input-field"
-            style={{ width: "auto", padding: "8px 10px" }}
-            value={range}
-            onChange={(e) => setRange(e.target.value)}
-            title="Filter payments by date range"
-          >
-            {RANGE_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>{o.label}</option>
-            ))}
-          </select>
+          {pendingMode ? (
+            <span className="pill pill-danger">{formatMonthLabel(pendingMonth)} · Not Paid</span>
+          ) : (
+            <select
+              className="input-field"
+              style={{ width: "auto", padding: "8px 10px" }}
+              value={range}
+              onChange={(e) => setRange(e.target.value)}
+              title="Filter payments by date range"
+            >
+              {RANGE_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          )}
           <button
             className="btn btn-primary"
             onClick={() => (showForm ? resetForm() : setShowForm(true))}
@@ -272,34 +317,77 @@ export default function PaymentsPage() {
         </form>
       )}
 
-      <div className="search-bar">
-        <span>🔍</span>
-        <input
-          placeholder="Search by tenant, apartment, unit, month, or note…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-      </div>
-
-      {visibleTotal !== null && (
-        <div
-          style={{
-            marginBottom: 16,
-            fontSize: 13.5,
-            color: "var(--color-text-muted)",
-          }}
-        >
-          {RANGE_LABEL[range]} · {filteredPayments.length} record{filteredPayments.length !== 1 ? "s" : ""} · total paid{" "}
-          <strong style={{ color: "var(--color-text)" }}>{formatMoney(visibleTotal, currency)}</strong>
+      {!pendingMode && (
+        <div className="search-bar">
+          <span>🔍</span>
+          <input
+            placeholder="Search by tenant, apartment, unit, month, or note…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
         </div>
+      )}
+
+      {pendingMode ? (
+        <div style={{ marginBottom: 16, fontSize: 13.5, color: "var(--color-text-muted)" }}>
+          {formatMonthLabel(pendingMonth)} · {pendingList.length} tenant{pendingList.length !== 1 ? "s" : ""} not paid yet · total pending{" "}
+          <strong style={{ color: "var(--color-text)" }}>{formatMoney(pendingTotal, currency)}</strong>
+        </div>
+      ) : (
+        visibleTotal !== null && (
+          <div style={{ marginBottom: 16, fontSize: 13.5, color: "var(--color-text-muted)" }}>
+            {unpaidOnly
+              ? `Pending balance · ${filteredPayments.length} record${filteredPayments.length !== 1 ? "s" : ""} · total owed `
+              : `${RANGE_LABEL[range]} · ${filteredPayments.length} record${filteredPayments.length !== 1 ? "s" : ""} · total paid `}
+            <strong style={{ color: "var(--color-text)" }}>{formatMoney(visibleTotal, currency)}</strong>
+          </div>
+        )
       )}
 
       <div className="card">
         {loading ? (
           <div className="empty-state">Loading…</div>
+        ) : pendingMode ? (
+          pendingList.length === 0 ? (
+            <div className="empty-state">No outstanding payments this month 🎉</div>
+          ) : (
+            <div className="table-wrap">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Tenant</th>
+                    <th>Apartment / Unit</th>
+                    <th>Status</th>
+                    <th>Pending Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pendingList.map((t) => (
+                    <tr
+                      key={t.tenant_id}
+                      className="clickable-row"
+                      onClick={() => navigate(`/payments?tenant_id=${t.tenant_id}&unpaid=1`)}
+                      title={`View ${t.tenant_name}'s unpaid records`}
+                    >
+                      <td data-label="Tenant">{t.tenant_name}</td>
+                      <td data-label="Apartment / Unit">
+                        {t.apartment_name ? `${t.apartment_name} · ${t.unit_number}` : "—"}
+                      </td>
+                      <td data-label="Status"><span className="pill pill-danger">Not Paid</span></td>
+                      <td data-label="Pending Amount">{formatMoney(t.pending_amount, currency)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )
         ) : sortedItems.length === 0 ? (
           <div className="empty-state">
-            {search ? "No payments match your search." : "No payments recorded yet."}
+            {unpaidOnly
+              ? "No outstanding balances 🎉"
+              : search
+              ? "No payments match your search."
+              : "No payments recorded yet."}
           </div>
         ) : (
           <div className="table-wrap">

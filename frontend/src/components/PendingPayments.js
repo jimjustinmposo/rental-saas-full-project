@@ -41,8 +41,8 @@ export default function PendingPayments() {
           {pending.map((t, i) => (
             <div
               key={t.tenant_id}
-              onClick={() => navigate(`/payments?tenant=${encodeURIComponent(t.tenant_name)}`)}
-              title="View this tenant's payment history"
+              onClick={() => navigate(`/payments?tenant_id=${t.tenant_id}&unpaid=1`)}
+              title={`View ${t.tenant_name}'s unpaid records totalling ${formatMoney(t.total_pending, currency)}`}
               style={{
                 display: "flex",
                 justifyContent: "space-between",

@@ -66,9 +66,9 @@ export default function SummaryCards({ summary }) {
       <Card
         label="Not Paid — This Month"
         value={`${summary.pendingCount ?? 0} unpaid`}
-        sublabel={`${formatMoney(summary.pendingAmount ?? 0, currency)} pending this month · view payments`}
+        sublabel={`${formatMoney(summary.pendingAmount ?? 0, currency)} pending this month · view the records`}
         tone="danger"
-        onClick={() => navigate("/payments?range=month")}
+        onClick={() => navigate("/payments?range=month&pending=1")}
       />
     </div>
   );

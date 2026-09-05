@@ -254,19 +254,27 @@ router.post("/checklist/toggle", async (req, res) => {
 });
 
 // GET /api/reports/pending?month=YYYY-MM
-// Active tenants who have NOT paid for the given month (defaults to current).
+// Active tenants who have NOT paid for the given month (defaults to current),
+// with the exact outstanding amount per tenant — remaining balance for partial
+// payers, otherwise the unit's current rent. Matches the "Not Paid — This
+// Month" dashboard card exactly.
 router.get("/pending", async (req, res) => {
   const month = req.query.month || currentMonthStr();
   try {
     const result = await pool.query(
       `SELECT t.id AS tenant_id, t.name AS tenant_name, t.phone,
-              a.name AS apartment_name, u.unit_number, u.current_rent
+              a.name AS apartment_name, u.unit_number, u.current_rent,
+              CASE WHEN p.id IS NOT NULL THEN p.balance
+                   ELSE COALESCE(u.current_rent, 0) END AS pending_amount
        FROM tenants t
-       LEFT JOIN units u ON u.id = t.unit_id
+       JOIN units u ON u.id = t.unit_id AND u.owner_id = t.owner_id
        LEFT JOIN apartments a ON a.id = u.apartment_id
-       LEFT JOIN payments p ON p.tenant_id = t.id AND p.month = $2
-         AND p.owner_id = t.owner_id AND p.status = 'Paid'
-       WHERE t.owner_id = $1 AND t.status = 'Active' AND p.id IS NULL
+       LEFT JOIN payments p ON p.tenant_id = t.id AND p.owner_id = t.owner_id
+         AND p.month = $2
+       WHERE t.owner_id = $1 AND t.status = 'Active'
+         AND (p.id IS NULL OR (p.status != 'Paid' AND p.balance > 0))
+         AND (CASE WHEN p.id IS NOT NULL THEN p.balance
+                   ELSE COALESCE(u.current_rent, 0) END) > 0
        ORDER BY a.name, t.name`,
       [req.ownerId, month]
     );

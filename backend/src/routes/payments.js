@@ -33,7 +33,7 @@ router.get("/", async (req, res) => {
        LEFT JOIN apartments a ON a.id = p.apartment_id
        WHERE p.owner_id = $1
          AND (t.move_in IS NULL OR to_date(p.month || '-01', 'YYYY-MM-DD') >= date_trunc('month', t.move_in))
-         AND (t.move_out IS NULL OR to_date(p.month || '-01', 'YYYY-MM-DD') < date_trunc('month', t.move_out))
+         AND (t.move_out IS NULL OR to_date(p.month || '-01', 'YYYY-MM-DD') < date(t.move_out))
          ${rangeCond}
        ORDER BY p.payment_date DESC NULLS LAST, p.id DESC`,
       [req.ownerId]

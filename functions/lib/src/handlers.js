@@ -572,8 +572,8 @@ async function handlePaymentRoutes(request, env, path) {
       else if (rangeParam === "year") rangeCond = " AND strftime('%Y', p.payment_date) = strftime('%Y','now')";
       const result = await query(db, `SELECT p.*, t.name AS tenant_name, u.unit_number, a.name AS apartment_name
         FROM payments p LEFT JOIN tenants t ON t.id = p.tenant_id LEFT JOIN units u ON u.id = p.unit_id LEFT JOIN apartments a ON a.id = p.apartment_id
-        WHERE p.owner_id = ? AND (t.move_in IS NULL OR date(p.month || '-01') >= date(t.move_in))
-          AND (t.move_out IS NULL OR date(p.month || '-01') < date(t.move_out))${rangeCond}
+        WHERE p.owner_id = ? AND (t.move_in IS NULL OR date(p.month || '-01') >= date(substr(t.move_in, 1, 7) || '-01'))
+          AND (t.move_out IS NULL OR date(p.month || '-01') < date(substr(t.move_out, 1, 7) || '-01'))${rangeCond}
         ORDER BY p.payment_date DESC NULLS LAST, p.id DESC`, [ownerId]);
       return new Response(JSON.stringify(result.rows), { status: 200, headers: { "Content-Type": "application/json" } });
     }

@@ -17,6 +17,19 @@ try {
   bcrypt = null;
 }
 
+/**
+ * PBKDF2-SHA256 iteration count for new password hashes.
+ *
+ * Cloudflare Workers' SubtleCrypto (used by `crypto.subtle.deriveBits`) is
+ * backed by BoringSSL, which caps PBKDF2 iterations at 100_000. The previous
+ * value of 120_000 therefore *threw* `NotSupportedError` at verification time,
+ * which surfaced as an opaque `500 "Server error"` on every login attempt —
+ * even when the password was correct. 100_000 is the maximum the runtime
+ * allows and remains well within OWASP's 2023 hardening guidance.
+ */
+const PBKDF2_ITERATIONS = 100000;
+
+
 function base64UrlEncode(bytes) {
   const binary = String.fromCharCode(...new Uint8Array(bytes));
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
@@ -46,12 +59,12 @@ async function hashPassword(password) {
     false,
     ["deriveBits"]
   );
-  const derived = await crypto.subtle.deriveBits(
+    const derived = await crypto.subtle.deriveBits(
     {
       name: "PBKDF2",
       hash: "SHA-256",
       salt,
-      iterations: 120000,
+      iterations: PBKDF2_ITERATIONS,
     },
     keyMaterial,
     256
@@ -59,7 +72,7 @@ async function hashPassword(password) {
 
   const saltStr = base64UrlEncode(salt);
   const hashStr = base64UrlEncode(derived);
-  return `pbkdf2_sha256$120000$${saltStr}$${hashStr}`;
+  return `pbkdf2_sha256$${PBKDF2_ITERATIONS}$${saltStr}$${hashStr}`;
 }
 
 async function verifyPassword(password, storedHash) {
@@ -340,10 +353,9 @@ async function handleAuthRoutes(request, env, path) {
       const token = await signJwt({ owner_id: owner.id, email: owner.email, exp: Math.floor(Date.now() / 1000) + 7 * 24 * 60 * 60 }, jwtSecret);
       const { password_hash, ...ownerData } = owner;
       return new Response(JSON.stringify({ token, owner: ownerData }), { status: 200, headers: { "Content-Type": "application/json" } });
-        } catch (err) {
+                } catch (err) {
       console.error("[auth/login]", err);
-      const msg = (err && err.stack) ? err.stack : String(err);
-      return new Response(JSON.stringify({ error: "Server error", debug: msg }), { status: 500, headers: { "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({ error: "Server error" }), { status: 500, headers: { "Content-Type": "application/json" } });
     }
   }
 

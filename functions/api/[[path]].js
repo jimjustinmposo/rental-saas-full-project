@@ -47,8 +47,18 @@ const DEV_ORIGINS = [
   "http://127.0.0.1:5173",
 ];
 
-function isProduction(env) {
-  return (env.NODE_ENV || "").toLowerCase() === "production";
+/**
+ * Development mode is OPT-IN: only an explicit NODE_ENV=development enables the
+ * local-development conveniences (dev CORS ports, dev fallback secrets).
+ *
+ * Anything else — "production", an empty string, or a variable that was never
+ * set on a deployment — is treated as a deployed environment and fails closed.
+ * Checking for "production" instead would silently give a misconfigured
+ * deployment the development fallbacks, which is exactly the hole we are
+ * closing (the fallback JWT secret is public in this repo).
+ */
+function isDevEnvironment(env) {
+  return (env.NODE_ENV || "").toLowerCase() === "development";
 }
 
 /**
@@ -61,7 +71,7 @@ function allowedOrigins(env) {
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
-  if (isProduction(env)) return configured;
+  if (!isDevEnvironment(env)) return configured;
   return configured.concat(DEV_ORIGINS);
 }
 
@@ -79,8 +89,8 @@ function getAllowedOrigin(request, env) {
 
   const allowed = allowedOrigins(env);
   if (allowed.length === 0) {
-    // Nothing configured: fail closed in production, stay permissive in dev.
-    return isProduction(env) ? null : origin;
+    // Nothing configured: fail closed unless we are explicitly in dev mode.
+    return isDevEnvironment(env) ? origin : null;
   }
   return allowed.includes(origin) ? origin : null;
 }
@@ -293,10 +303,14 @@ export async function onRequest(context) {
     switch (resource) {
       case "health":
         // Booleans only — never echo secret values. Lets an operator confirm
-        // that `wrangler secret put` actually landed before users hit 401s.
+        // that `wrangler pages secret put ... --project-name <project>` landed
+        // before users start seeing 401s and 500s.
         response = new Response(
           JSON.stringify({
             status: "ok",
+            // Which behaviour the deployment is running: "development" enables
+            // the dev fallbacks, "production" fails closed.
+            environment: isDevEnvironment(env) ? "development" : "production",
             configured: {
               jwtSecret: Boolean(env.JWT_SECRET),
               adminSignupPassword: Boolean(env.ADMIN_SIGNUP_PASSWORD),

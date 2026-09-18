@@ -158,29 +158,45 @@ async function verifyJwt(token, secret) {
 }
 
 /**
+ * Development mode is OPT-IN: only an explicit NODE_ENV=development (supplied
+ * by `.dev.vars` when running `wrangler pages dev`) enables local fallbacks.
+ *
+ * Every other value — "production", an empty string, or a variable that was
+ * never set on a deployment — is treated as a live environment. Checking for
+ * "production" instead would silently hand a misconfigured deployment the
+ * shared dev secret that ships in this public repository.
+ */
+function isDevEnvironment(env) {
+  return (env.NODE_ENV || "").toLowerCase() === "development";
+}
+
+/**
  * Resolve the JWT signing secret.
  *
- * Production must supply JWT_SECRET as a Cloudflare secret
- * (`wrangler secret put JWT_SECRET`). We deliberately do NOT fall back to a
- * hardcoded value in production: a shared default secret would let anyone who
- * can read the repo mint valid tokens for every account.
+ * Deployments must supply JWT_SECRET as a Cloudflare secret:
+ *   wrangler pages secret put JWT_SECRET --project-name <project> --env production
+ * We deliberately do NOT fall back to a hardcoded value outside dev: a shared
+ * default secret would let anyone who can read the repo mint valid tokens for
+ * every account.
  */
 function resolveJwtSecret(env) {
   if (env.JWT_SECRET) return env.JWT_SECRET;
-  if ((env.NODE_ENV || "").toLowerCase() === "production") {
-    throw new Error("JWT_SECRET is not configured. Run: wrangler secret put JWT_SECRET");
+  if (!isDevEnvironment(env)) {
+    throw new Error(
+      "JWT_SECRET is not configured. Run: wrangler pages secret put JWT_SECRET --project-name <project> --env production"
+    );
   }
   return "dev-secret"; // local development only
 }
 
 /**
  * Resolve the shared password required to create a new owner account.
- * Returns null in production when unset, which disables signup instead of
+ * Returns null outside dev when unset, which disables signup instead of
  * silently accepting a hardcoded password.
  */
 function resolveAdminPassword(env) {
   if (env.ADMIN_SIGNUP_PASSWORD) return env.ADMIN_SIGNUP_PASSWORD;
-  if ((env.NODE_ENV || "").toLowerCase() === "production") return null;
+  if (!isDevEnvironment(env)) return null;
   return "fmc10123"; // local development only (see .dev.vars.example)
 }
 

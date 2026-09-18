@@ -1,14 +1,26 @@
 # Cloudflare Migration - Quick Start Checklist
-> ### ️ Breaking change: secrets are no longer committed
+> ### ⚠️ Breaking change: secrets are no longer committed
 >
 > `JWT_SECRET` and `ADMIN_SIGNUP_PASSWORD` used to sit in `wrangler.toml` as
-> plaintext. They have been removed. The API now **fails closed in production**:
-> without `JWT_SECRET` every API call returns 401, and without
-> `ADMIN_SIGNUP_PASSWORD` signup returns 503 (no hardcoded fallback is used).
-> Run the commands in **Phase 8** *before* the first production deploy.
+> plaintext (they are still in this repo's Git history, so treat them as
+> compromised and use fresh values). They have been removed from the config and
+> the API now **fails closed in every deployed environment**:
 >
-> Verify with `https://<your-project>.pages.dev/api/health` — every flag in the
-> `configured` object must be `true`.
+> | Missing secret | What users see |
+> | --- | --- |
+> | `JWT_SECRET` | login/signup → **500**, every authenticated request → **401** |
+> | `ADMIN_SIGNUP_PASSWORD` | signup → **503** "Signup is disabled on this deployment." |
+>
+> There is no hardcoded fallback outside dev mode, and dev mode is opt-in: it
+> activates only when `NODE_ENV=development`, which comes from `.dev.vars`
+> locally and is never set on a deployed environment.
+>
+> **This is a Pages project, so use `wrangler pages secret put` — plain
+> `wrangler secret put` targets Workers and will not configure this app.** Run
+> **Phase 8** *before* the first production deploy.
+>
+> Verify with `https://<project>.pages.dev/api/health` — `environment` must read
+> `production` and every flag in `configured` must be `true`.
 
 ## Pre-Migration
 
@@ -151,8 +163,10 @@ git branch -M main
 wrangler pages project create
 # Follow prompts to connect GitHub repo
 
-# 3. Deploy
-wrangler pages deploy
+# 3. Deploy the staging build
+#    --branch picks production vs preview: it must match the project's
+#    configured production branch (main) to be a production deployment.
+wrangler pages deploy --project-name rental-saas-preview --branch preview
 # or: git push origin main (if using GitHub Actions)
 ```
 
@@ -161,23 +175,45 @@ wrangler pages deploy
 - [ ] Staging deployment URL working
 - [ ] Test in staging: `https://your-project.pages.dev/api/health`
 
-## Phase 8: Production Secrets (5 min)
+## Phase 8: Secrets — do this BEFORE deploying (5 min)
+
+`wrangler.toml` declares `pages_build_output_dir`, so this is a **Pages**
+project: secrets are stored per project *and* per environment with
+`wrangler pages secret put`. `wrangler secret put` configures Workers and does
+not apply here.
 
 ```bash
-# 1. Generate a strong signing key (use the output for JWT_SECRET)
+# 1. Generate a strong signing key (paste the output when prompted below)
 openssl rand -base64 32
 
-# 2. Set production secrets
-wrangler secret put --env production ADMIN_SIGNUP_PASSWORD
-wrangler secret put --env production JWT_SECRET
-wrangler secret put --env production FRONTEND_URL
+# 2. Production project
+wrangler pages secret put JWT_SECRET --project-name rental-saas-prod --env production
+wrangler pages secret put ADMIN_SIGNUP_PASSWORD --project-name rental-saas-prod --env production
 
-# 3. Verify (booleans only - no secret values are exposed)
-curl https://<your-project>.pages.dev/api/health
+# 3. Staging/preview project as well - it points at the SAME D1 database, so it
+#    must also hold real secrets rather than falling back to dev values
+wrangler pages secret put JWT_SECRET --project-name rental-saas-preview --env preview
+wrangler pages secret put ADMIN_SIGNUP_PASSWORD --project-name rental-saas-preview --env preview
+
+# 4. Confirm the names are stored (values are never displayed)
+wrangler pages secret list --project-name rental-saas-prod --env production
+
+# 5. Verify from outside (booleans only - no secret values are exposed)
+curl https://rental-saas-prod.pages.dev/api/health
 ```
 
-- [ ] All production secrets set via `wrangler secret put`
-- [ ] `/api/health` reports `jwtSecret` and `adminSignupPassword` as `true`
+Notes:
+- `FRONTEND_URL` is **not** a secret. It lives in `wrangler.toml` under
+  `[env.production.vars]` / `[env.preview.vars]`, so it stays in source control.
+- `NODE_ENV` must **never** be `development` on a deployed environment. The API
+  treats "development" as the only opt-in to dev fallbacks; anything else
+  (including unset) fails closed.
+- Because the old plaintext secret is in this repo's Git history, rotate it:
+  generate a fresh value rather than reusing anything that was ever committed.
+
+- [ ] Secrets set with `wrangler pages secret put` (both projects)
+- [ ] `wrangler pages secret list` shows both secret names
+- [ ] `/api/health` reports `environment: "production"` and `jwtSecret` / `adminSignupPassword` as `true`
 - [ ] Do NOT commit secrets to Git
 - [ ] `.dev.vars` is in `.gitignore`
 
@@ -195,14 +231,27 @@ curl https://<your-project>.pages.dev/api/health
 
 ## Phase 10: Production Deployment
 
-```bash
-# Final deployment
-wrangler pages deploy --env production
+`wrangler pages deploy` has no `--env` flag. Production vs preview is decided by
+`--branch`, which must match the project's configured production branch
+(Dashboard → Pages → project → Settings → Builds & deployments → Production
+branch).
 
-# Or via GitHub:
-# Tag release and push: git push origin v2.0.0
+```bash
+# 1. Build the SPA. This creates frontend/build, including public/_headers
+#    (CRA copies everything in public/ into the build output).
+cd frontend
+npm ci
+npm run build
+cd ..
+
+# 2. Deploy the directory declared by pages_build_output_dir in wrangler.toml
+wrangler pages deploy --project-name rental-saas-prod --branch main
+
+# 3. Verify
+curl https://rental-saas-prod.pages.dev/api/health
 ```
 
+- [ ] `frontend/build/index.html` and `frontend/build/_headers` exist after the build
 - [ ] Production code deployed
 - [ ] Database, R2, and Secrets are production versions
 - [ ] Test API: `curl https://api.yourdomain.com/api/health`

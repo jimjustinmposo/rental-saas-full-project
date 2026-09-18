@@ -8,17 +8,22 @@ pages_build_output_dir = "./frontend/build"
 # ============================================================
 # JWT_SECRET and ADMIN_SIGNUP_PASSWORD used to be committed here as plaintext,
 # which let anyone with repo access forge login tokens or mint accounts.
-# They are Cloudflare secrets now - set them once per environment:
 #
-#   wrangler secret put JWT_SECRET            --env production
-#   wrangler secret put ADMIN_SIGNUP_PASSWORD --env production
+# This is a Cloudflare PAGES project, so plain `wrangler secret put` does NOT
+# apply. Pages secrets are stored per PROJECT and per ENVIRONMENT:
+#
+#   wrangler pages secret put JWT_SECRET --project-name rental-saas-prod --env production
+#   wrangler pages secret put ADMIN_SIGNUP_PASSWORD --project-name rental-saas-prod --env production
 #
 # Generate a strong JWT secret with:  openssl rand -base64 32
 #
-# The API fails closed in production when JWT_SECRET is missing: it will NOT
-# silently fall back to a shared development secret.
+# The API fails closed in EVERY deployed environment when JWT_SECRET is missing:
+# login/signup return 500 and authenticated calls return 401. It will NOT
+# silently fall back to the shared development secret below. The fallbacks only
+# activate when NODE_ENV is explicitly "development", which comes from .dev.vars
+# (gitignored) during `wrangler pages dev`.
 #
-# For local development, copy .dev.vars.example to .dev.vars (gitignored).
+# For local development, copy .dev.vars.example to .dev.vars.
 
 # ============================================================
 # ENVIRONMENTS
@@ -29,7 +34,13 @@ name = "rental-saas-prod"
 
 [env.production.vars]
 # Public, non-secret configuration only.
-NODE_ENV = "production"
+#
+# NODE_ENV is deliberately NOT set here. The API treats anything other than an
+# explicit "development" as a live deployment and fails closed, so an unset
+# NODE_ENV is already the safe state. Never add NODE_ENV=development to a
+# deployed environment: it would re-enable the shared dev JWT secret that is
+# public in this repository.
+#
 # Comma-separated CORS allowlist. Add a custom domain here when you attach one.
 FRONTEND_URL = "https://rental-saas.pages.dev,https://rental-saas-prod.pages.dev"
 
@@ -47,8 +58,16 @@ jurisdiction = "eu"
 name = "rental-saas-preview"
 
 [env.preview.vars]
-# Public, non-secret configuration only - secrets come from .dev.vars locally.
-NODE_ENV = "development"
+# Public, non-secret configuration only.
+#
+# NODE_ENV must NOT be "development" here. This deployment points at the same
+# D1 database and R2 bucket as production, and development mode would enable
+# the shared dev JWT secret (public in this repo) plus localhost CORS - i.e.
+# forgeable tokens against live data. Local development gets
+# NODE_ENV=development from .dev.vars instead.
+#
+# These localhost origins matter only when the SPA runs on a dev port and calls
+# the API cross-origin; the deployed SPA is same-origin with /api.
 FRONTEND_URL = "http://localhost:3000,http://localhost:5173"
 
 [[env.preview.d1_databases]]

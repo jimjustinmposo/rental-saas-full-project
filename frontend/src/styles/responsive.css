@@ -21,6 +21,9 @@
   flex-shrink: 0;
   overflow-y: auto;
   z-index: 30;
+  /* GPU-composited scroll — no layout thrash on nav */
+  transform: translateZ(0);
+  overscroll-behavior: contain;
 }
 
 .main-area {
@@ -48,6 +51,15 @@
   align-items: start;
 }
 
+/* ---------- Dashboard 2-col variant (used inline, now a proper class) ---------- */
+.dashboard-row-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  margin-top: 20px;
+  align-items: start;
+}
+
 .stat-block {
   display: flex;
   flex-direction: column;
@@ -62,6 +74,9 @@
     grid-template-columns: repeat(2, 1fr);
   }
   .dashboard-row-3 {
+    grid-template-columns: 1fr;
+  }
+  .dashboard-row-2 {
     grid-template-columns: 1fr;
   }
   .form-grid {
@@ -92,6 +107,8 @@
     z-index: 40;
     background: linear-gradient(135deg, var(--color-sidebar-from), var(--color-sidebar-to));
     color: white;
+    /* GPU layer prevents repaint on scroll */
+    transform: translateZ(0);
   }
 
   .main-area {
@@ -108,6 +125,10 @@
   }
 
   .dashboard-row-3 {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-row-2 {
     grid-template-columns: 1fr;
   }
 
@@ -154,6 +175,14 @@
   .card {
     padding: 16px;
   }
+
+  /* Tighter toast on mobile */
+  .toast {
+    bottom: 16px;
+    right: 12px;
+    left: 12px;
+    text-align: center;
+  }
 }
 
 /* Charts always fill and resize with their container */
@@ -172,4 +201,23 @@
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 16px;
+}
+
+/* ============================================================
+   PERFORMANCE: contain paint for long list sections
+   ============================================================ */
+.content-section {
+  contain: layout style;
+}
+
+/* ============================================================
+   STICKY TABLE HEADER for long tables on desktop
+   ============================================================ */
+@media (min-width: 768px) {
+  .table-sticky thead th {
+    position: sticky;
+    top: 0;
+    background: var(--color-surface);
+    z-index: 2;
+  }
 }

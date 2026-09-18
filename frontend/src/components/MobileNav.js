@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "../api/AuthContext";
+import { prefetchRoute } from "../utils/prefetch";
 
 const NAV_ITEMS = [
   { to: "/dashboard", label: "Dashboard", icon: "🏠" },
@@ -41,6 +42,9 @@ export default function MobileNav() {
               key={item.to}
               to={item.to}
               onClick={() => setOpen(false)}
+              onMouseEnter={() => prefetchRoute(item.to)}
+              onTouchStart={() => prefetchRoute(item.to)}
+              onFocus={() => prefetchRoute(item.to)}
               style={({ isActive }) => ({
                 display: "flex",
                 alignItems: "center",

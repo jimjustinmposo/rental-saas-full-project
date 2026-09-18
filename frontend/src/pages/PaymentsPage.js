@@ -1,11 +1,13 @@
-import React, { useEffect, useState, useMemo } from "react";
+﻿import React, { useEffect, useState, useMemo } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import apiClient from "../api/apiClient";
+import { cachedGet, invalidate } from "../api/cache";
 import { useSortableData } from "../hooks/useSortableData";
 import { useAuth } from "../api/AuthContext";
 import { formatMoney } from "../utils/currency";
 import { formatMonthLabel, parseMonthInput, currentMonthValue, MONTH_INPUT_EXAMPLE, MONTH_INPUT_ERROR } from "../utils/month";
 import SearchableSelect from "../components/SearchableSelect";
+import { SkeletonTable } from "../components/Skeleton";
 
 const emptyForm = {
   tenant_id: "",
@@ -76,10 +78,10 @@ export default function PaymentsPage() {
     }
     Promise.all([
       apiClient.get("/payments", { params: range !== "all" ? { range } : undefined }),
-      apiClient.get("/tenants"),
+      cachedGet("/tenants", { ttl: 30_000 }),
     ]).then(([p, t]) => {
       setPayments(p.data);
-      setTenants(t.data);
+      setTenants(t);
     }).finally(() => setLoading(false));
   };
 
@@ -126,6 +128,7 @@ export default function PaymentsPage() {
       // enforces "one payment per tenant per month."
       await apiClient.post("/payments", { ...form, month: storedMonth });
     }
+    invalidate(["/reports/dashboard", "/reports/checklist", "/reports/pending-all"]);
     resetForm();
     load();
   };
@@ -150,6 +153,7 @@ export default function PaymentsPage() {
   const handleDelete = async (id) => {
     if (!window.confirm("Delete this payment record?")) return;
     await apiClient.delete(`/payments/${id}`);
+    invalidate(["/reports/dashboard", "/reports/checklist", "/reports/pending-all"]);
     load();
   };
 
@@ -206,7 +210,7 @@ export default function PaymentsPage() {
   );
 
   return (
-    <div>
+    <div className="page-fade-in">
       <div className="page-header">
         <h1>Payments</h1>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
@@ -343,10 +347,9 @@ export default function PaymentsPage() {
           </div>
         )
       )}
-
       <div className="card">
         {loading ? (
-          <div className="empty-state">Loading…</div>
+          <SkeletonTable rows={5} cols={6} />
         ) : pendingMode ? (
           pendingList.length === 0 ? (
             <div className="empty-state">No outstanding payments this month 🎉</div>
@@ -367,11 +370,11 @@ export default function PaymentsPage() {
                       key={t.tenant_id}
                       className="clickable-row"
                       onClick={() => navigate(`/payments?tenant_id=${t.tenant_id}&unpaid=1`)}
-                      title={`View ${t.tenant_name}'s unpaid records`}
+                      title={`View ${t.tenant_name}s unpaid records`}
                     >
                       <td data-label="Tenant">{t.tenant_name}</td>
                       <td data-label="Apartment / Unit">
-                        {t.apartment_name ? `${t.apartment_name} · ${t.unit_number}` : "—"}
+                        {t.apartment_name ? `${t.apartment_name} \u00b7 ${t.unit_number}` : "\u2014"}
                       </td>
                       <td data-label="Status"><span className="pill pill-danger">Not Paid</span></td>
                       <td data-label="Pending Amount">{formatMoney(t.pending_amount, currency)}</td>

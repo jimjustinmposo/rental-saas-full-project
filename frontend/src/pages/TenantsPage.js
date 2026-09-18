@@ -1,8 +1,11 @@
-import React, { useEffect, useState, useMemo } from "react";
+﻿import React, { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import apiClient from "../api/apiClient";
+import { cachedGet, invalidate } from "../api/cache";
 import { useAuth } from "../api/AuthContext";
+import { formatMoney } from "../utils/currency";
 import SearchableSelect from "../components/SearchableSelect";
+import { SkeletonTenantCards } from "../components/Skeleton";
 
 const emptyForm = { name: "", phone: "", unit_id: "", move_in: "", move_out: "", deposit: "" };
 
@@ -20,15 +23,28 @@ export default function TenantsPage() {
   const [uploading, setUploading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [toast, setToast] = useState(null);
 
   const load = () => {
-    Promise.all([apiClient.get("/tenants"), apiClient.get("/units")]).then(([t, u]) => {
-      setTenants(t.data);
-      setUnits(u.data);
+    Promise.all([
+      cachedGet("/tenants", { ttl: 30_000 }),
+      cachedGet("/units", { ttl: 60_000 }),
+    ]).then(([t, u]) => {
+      setTenants(t);
+      setUnits(u);
     }).finally(() => setLoading(false));
   };
 
   useEffect(load, []);
+
+  // Lightweight inline feedback (styles: .toast / .toast-danger in theme.css).
+  const showToast = (message, type = "danger") => setToast({ message, type });
+
+  useEffect(() => {
+    if (!toast) return undefined;
+    const timer = setTimeout(() => setToast(null), 3500);
+    return () => clearTimeout(timer);
+  }, [toast]);
 
   const resetForm = () => {
     setForm(emptyForm);
@@ -41,6 +57,20 @@ export default function TenantsPage() {
   const handleImageChange = (e) => {
     const file = e.target.files[0];
     if (!file) return;
+    // Mirror the server-side limits (src/handlers.js -> tenants/upload-image)
+    // so the user gets an instant message instead of a 413 after uploading.
+    const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+    if (!ALLOWED_TYPES.includes(file.type)) {
+      showToast("Please choose a JPG, PNG, WEBP or GIF image.");
+      e.target.value = "";
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      showToast("Image must be 2 MB or smaller.");
+      e.target.value = "";
+      return;
+    }
+
     setImageFile(file);
     setImagePreview(URL.createObjectURL(file));
   };
@@ -60,14 +90,17 @@ export default function TenantsPage() {
       }
       const payload = { ...form, unit_id: form.unit_id || "" };
       if (image_url) payload.image_url = image_url;
-
       if (editingId) {
         await apiClient.put(`/tenants/${editingId}`, payload);
       } else {
         await apiClient.post("/tenants", payload);
       }
+      invalidate(["/tenants", "/units"]);
       resetForm();
       load();
+    } catch (err) {
+      showToast(err?.response?.data?.error || "Could not save the tenant. Please try again.");
+
     } finally {
       setUploading(false);
     }
@@ -85,11 +118,13 @@ export default function TenantsPage() {
     });
     setShowForm(true);
     window.scrollTo({ top: 0, behavior: "smooth" });
+    invalidate(["/tenants", "/units"]);
   };
 
   const handleDelete = async (id) => {
     if (!window.confirm("Permanently delete this tenant record? Consider setting status to Unassigned instead if they just moved out.")) return;
     await apiClient.delete(`/tenants/${id}`);
+    invalidate(["/tenants", "/units"]);
     load();
   };
 
@@ -106,7 +141,7 @@ export default function TenantsPage() {
   }, [tenants, search]);
 
   return (
-    <div>
+    <div className="page-fade-in">
       <div className="page-header">
         <h1>Tenants</h1>
         <button
@@ -141,27 +176,17 @@ export default function TenantsPage() {
             </div>
             <div>
               <label className="field-label">Tenant photo {editingId && "(leave blank to keep current)"}</label>
-              <input type="file" accept="image/*" onChange={handleImageChange} />
+              <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={handleImageChange} />
             </div>
           </div>
-
           <div className="form-grid">
             <div>
               <label className="field-label">Full name</label>
-              <input
-                className="input-field"
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-                required
-              />
+              <input className="input-field" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
             </div>
             <div>
               <label className="field-label">Phone</label>
-              <input
-                className="input-field"
-                value={form.phone}
-                onChange={(e) => setForm({ ...form, phone: e.target.value })}
-              />
+              <input className="input-field" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
             </div>
             <div>
               <label className="field-label">Unit</label>
@@ -171,24 +196,13 @@ export default function TenantsPage() {
                   ...units.map((u) => ({ value: u.id, label: `${u.apartment_name} — ${u.unit_number}` })),
                 ]}
                 value={form.unit_id}
-                onChange={(val) =>
-                  setForm({
-                    ...form,
-                    unit_id: val,
-                    move_out: val ? "" : form.move_out, // picking a unit means they're active again
-                  })
-                }
+                onChange={(val) => setForm({ ...form, unit_id: val, move_out: val ? "" : form.move_out })}
                 placeholder="Search apartment or unit number…"
               />
             </div>
             <div>
               <label className="field-label">Move-in date</label>
-              <input
-                type="date"
-                className="input-field"
-                value={form.move_in}
-                onChange={(e) => setForm({ ...form, move_in: e.target.value })}
-              />
+              <input type="date" className="input-field" value={form.move_in} onChange={(e) => setForm({ ...form, move_in: e.target.value })} />
             </div>
             <div>
               <label className="field-label">Move-out date</label>
@@ -196,23 +210,12 @@ export default function TenantsPage() {
                 type="date"
                 className="input-field"
                 value={form.move_out}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    move_out: e.target.value,
-                    unit_id: e.target.value ? "" : form.unit_id, // a move-out date always frees their unit
-                  })
-                }
+                onChange={(e) => setForm({ ...form, move_out: e.target.value, unit_id: e.target.value ? "" : form.unit_id })}
               />
             </div>
             <div>
               <label className="field-label">Deposit ({currency})</label>
-              <input
-                type="number"
-                className="input-field"
-                value={form.deposit}
-                onChange={(e) => setForm({ ...form, deposit: e.target.value })}
-              />
+              <input type="number" className="input-field" value={form.deposit} onChange={(e) => setForm({ ...form, deposit: e.target.value })} />
             </div>
           </div>
           <div style={{ fontSize: 12.5, color: "var(--color-text-muted)", marginTop: 8 }}>
@@ -234,7 +237,7 @@ export default function TenantsPage() {
       </div>
 
       {loading ? (
-        <div className="empty-state">Loading…</div>
+        <SkeletonTenantCards count={6} />
       ) : filteredTenants.length === 0 ? (
         <div className="card empty-state">
           {search ? "No tenants match your search." : "No tenants yet. Add your first tenant above."}
@@ -267,9 +270,7 @@ export default function TenantsPage() {
                   height: 64,
                   borderRadius: "50%",
                   margin: "0 auto 10px",
-                  background: t.image_url
-                    ? `url(${t.image_url}) center/cover`
-                    : "var(--color-primary-light)",
+                  background: t.image_url ? `url(${t.image_url}) center/cover` : "var(--color-primary-light)",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
@@ -283,6 +284,9 @@ export default function TenantsPage() {
                 {t.apartment_name ? `${t.apartment_name} · ${t.unit_number}` : "No unit assigned"}
               </div>
               <div style={{ fontSize: 12.5, color: "var(--color-text-faint)", marginTop: 2 }}>{t.phone}</div>
+              {t.deposit ? (
+                <div style={{ fontSize: 12, color: "var(--color-text-muted)", marginTop: 2 }}>Deposit: {formatMoney(t.deposit, currency)}</div>
+              ) : null}
               <span
                 className={`pill ${t.status === "Unassigned" ? "pill-danger" : "pill-success"}`}
                 style={{ marginTop: 8, display: "inline-block" }}
@@ -293,20 +297,14 @@ export default function TenantsPage() {
                 <button
                   className="btn btn-secondary"
                   style={{ padding: "6px 14px" }}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleEditClick(t);
-                  }}
+                  onClick={(e) => { e.stopPropagation(); handleEditClick(t); }}
                 >
                   Edit
                 </button>
                 <button
                   className="btn btn-danger"
                   style={{ padding: "6px 14px" }}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleDelete(t.id);
-                  }}
+                  onClick={(e) => { e.stopPropagation(); handleDelete(t.id); }}
                 >
                   Remove
                 </button>
@@ -315,6 +313,13 @@ export default function TenantsPage() {
           ))}
         </div>
       )}
+
+      {toast && (
+        <div className={`toast toast-${toast.type}`} role="status">
+          {toast.message}
+        </div>
+      )}
+
     </div>
   );
 }

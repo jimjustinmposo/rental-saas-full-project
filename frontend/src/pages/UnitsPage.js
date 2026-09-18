@@ -1,10 +1,12 @@
 import React, { useEffect, useState, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import apiClient from "../api/apiClient";
+import { cachedGet, invalidate } from "../api/cache";
 import { useSortableData } from "../hooks/useSortableData";
 import { useAuth } from "../api/AuthContext";
 import { formatMoney } from "../utils/currency";
 import SearchableSelect from "../components/SearchableSelect";
+import { SkeletonTable } from "../components/Skeleton";
 
 export default function UnitsPage() {
   const { owner } = useAuth();
@@ -19,9 +21,12 @@ export default function UnitsPage() {
   const [search, setSearch] = useState(searchParams.get("apartment") || "");
 
   const load = () => {
-    Promise.all([apiClient.get("/units"), apiClient.get("/apartments")]).then(([u, a]) => {
-      setUnits(u.data);
-      setApartments(a.data);
+    Promise.all([
+      cachedGet("/units", { ttl: 30_000 }),
+      cachedGet("/apartments", { ttl: 60_000 }),
+    ]).then(([u, a]) => {
+      setUnits(u);
+      setApartments(a);
     }).finally(() => setLoading(false));
   };
 
@@ -44,6 +49,7 @@ export default function UnitsPage() {
     } else {
       await apiClient.post("/units", form);
     }
+    invalidate(["/units", "/apartments", "/tenants"]);
     resetForm();
     load();
   };
@@ -63,6 +69,7 @@ export default function UnitsPage() {
   const handleDelete = async (id) => {
     if (!window.confirm("Delete this unit?")) return;
     await apiClient.delete(`/units/${id}`);
+    invalidate(["/units", "/apartments"]);
     load();
   };
 
@@ -80,7 +87,7 @@ export default function UnitsPage() {
   const { sortedItems, requestSort, sortIndicator } = useSortableData(filteredUnits);
 
   return (
-    <div>
+    <div className="page-fade-in">
       <div className="page-header">
         <h1>Units</h1>
         <button
@@ -158,7 +165,7 @@ export default function UnitsPage() {
 
       <div className="card">
         {loading ? (
-          <div className="empty-state">Loading…</div>
+          <SkeletonTable rows={5} cols={5} />
         ) : sortedItems.length === 0 ? (
           <div className="empty-state">
             {search ? "No units match your search." : "No units yet. Add a unit to a property above."}

@@ -27,7 +27,7 @@ export default function SettingsPage() {
   };
 
   return (
-    <div>
+    <div className="page-fade-in">
       <div className="page-header">
         <h1>Settings</h1>
       </div>

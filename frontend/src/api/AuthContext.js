@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useCallback } from "react";
 import apiClient from "./apiClient";
+import { clearCache } from "./cache";
 
 const AuthContext = createContext(null);
 
@@ -33,6 +34,7 @@ export function AuthProvider({ children }) {
     localStorage.removeItem("owner");
     setToken(null);
     setOwner(null);
+    clearCache();
   }, []);
 
   const updateCurrency = useCallback(async (currency) => {

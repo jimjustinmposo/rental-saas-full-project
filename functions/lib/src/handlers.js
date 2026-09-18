@@ -157,12 +157,39 @@ async function verifyJwt(token, secret) {
   return JSON.parse(base64UrlDecode(payload));
 }
 
+/**
+ * Resolve the JWT signing secret.
+ *
+ * Production must supply JWT_SECRET as a Cloudflare secret
+ * (`wrangler secret put JWT_SECRET`). We deliberately do NOT fall back to a
+ * hardcoded value in production: a shared default secret would let anyone who
+ * can read the repo mint valid tokens for every account.
+ */
+function resolveJwtSecret(env) {
+  if (env.JWT_SECRET) return env.JWT_SECRET;
+  if ((env.NODE_ENV || "").toLowerCase() === "production") {
+    throw new Error("JWT_SECRET is not configured. Run: wrangler secret put JWT_SECRET");
+  }
+  return "dev-secret"; // local development only
+}
+
+/**
+ * Resolve the shared password required to create a new owner account.
+ * Returns null in production when unset, which disables signup instead of
+ * silently accepting a hardcoded password.
+ */
+function resolveAdminPassword(env) {
+  if (env.ADMIN_SIGNUP_PASSWORD) return env.ADMIN_SIGNUP_PASSWORD;
+  if ((env.NODE_ENV || "").toLowerCase() === "production") return null;
+  return "fmc10123"; // local development only (see .dev.vars.example)
+}
+
 async function getOwnerId(request, env) {
   const authHeader = request.headers.get("Authorization");
   if (!authHeader || !authHeader.startsWith("Bearer ")) return null;
   try {
     const token = authHeader.slice(7);
-    const decoded = await verifyJwt(token, env.JWT_SECRET || "dev-secret");
+    const decoded = await verifyJwt(token, resolveJwtSecret(env));
     return decoded.owner_id;
   } catch (err) {
     console.error("[auth] Token verification failed:", err.message);
@@ -181,6 +208,22 @@ async function getBody(request) {
 function getPathId(path) {
   const parts = path.split("/").filter(Boolean);
   return parts.length > 0 ? parts[0] : null;
+}
+
+/**
+ * True only for a value that can be safely stored as a SQLite REAL.
+ * Rejects "", null, undefined, NaN, Infinity and non-numeric strings — note
+ * that `Number(Infinity) || 0` is still Infinity, so a plain `|| 0` coercion is
+ * not enough to keep bad data out of the ledger.
+ */
+function isFiniteNumber(value) {
+  if (value === null || value === undefined || value === "") return false;
+  return Number.isFinite(Number(value));
+}
+
+/** True for a syntactically plausible email address (used on signup). */
+function isValidEmail(value) {
+  return typeof value === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(value.trim());
 }
 
 function computePaymentStatus(due, paid) {
@@ -209,24 +252,35 @@ async function recomputeUnitStatus(db, unitId, ownerId) {
 async function handleAuthRoutes(request, env, path) {
   const method = request.method;
   const db = env.DB;
-  const jwtSecret = env.JWT_SECRET || "dev-secret";
+  const jwtSecret = resolveJwtSecret(env);
 
   if (path === "verify-admin-password" && method === "POST") {
     const body = await getBody(request);
     if (!body) return new Response(JSON.stringify({ error: "Invalid request" }), { status: 400, headers: { "Content-Type": "application/json" } });
     const { password } = body;
-    const adminPassword = env.ADMIN_SIGNUP_PASSWORD || "fmc10123";
-    return new Response(JSON.stringify({ ok: password === adminPassword }), { status: password === adminPassword ? 200 : 401, headers: { "Content-Type": "application/json" } });
+    const adminPassword = resolveAdminPassword(env);
+    if (!adminPassword) {
+      console.error("[auth/verify-admin-password] ADMIN_SIGNUP_PASSWORD is not configured");
+      return new Response(JSON.stringify({ error: "Signup is disabled on this deployment." }), { status: 503, headers: { "Content-Type": "application/json" } });
+    }
+    // Timing-safe compare so this endpoint can't be used as a character oracle.
+    const ok = safeEqual(String(password || ""), adminPassword);
+    return new Response(JSON.stringify({ ok }), { status: ok ? 200 : 401, headers: { "Content-Type": "application/json" } });
   }
 
   if (path === "signup" && method === "POST") {
     const body = await getBody(request);
     if (!body) return new Response(JSON.stringify({ error: "Invalid request" }), { status: 400, headers: { "Content-Type": "application/json" } });
     const { adminPassword, name, email, password, confirmPassword } = body;
-    const requiredAdminPassword = env.ADMIN_SIGNUP_PASSWORD || "fmc10123";
+    const requiredAdminPassword = resolveAdminPassword(env);
+    if (!requiredAdminPassword) {
+      console.error("[auth/signup] ADMIN_SIGNUP_PASSWORD is not configured");
+      return new Response(JSON.stringify({ error: "Signup is disabled on this deployment." }), { status: 503, headers: { "Content-Type": "application/json" } });
+    }
 
-    if (adminPassword !== requiredAdminPassword) return new Response(JSON.stringify({ error: "Incorrect admin password." }), { status: 401, headers: { "Content-Type": "application/json" } });
+    if (!safeEqual(String(adminPassword || ""), requiredAdminPassword)) return new Response(JSON.stringify({ error: "Incorrect admin password." }), { status: 401, headers: { "Content-Type": "application/json" } });
     if (!name || !email || !password || !confirmPassword) return new Response(JSON.stringify({ error: "All fields are required." }), { status: 400, headers: { "Content-Type": "application/json" } });
+    if (!isValidEmail(email)) return new Response(JSON.stringify({ error: "Please enter a valid email address." }), { status: 400, headers: { "Content-Type": "application/json" } });
     if (password !== confirmPassword) return new Response(JSON.stringify({ error: "Passwords do not match." }), { status: 400, headers: { "Content-Type": "application/json" } });
     if (password.length < 6) return new Response(JSON.stringify({ error: "Password must be at least 6 characters." }), { status: 400, headers: { "Content-Type": "application/json" } });
 
@@ -441,15 +495,28 @@ async function handleTenantRoutes(request, env, path) {
     if (path === "upload-image" && method === "POST") {
       if (!bucket) return new Response(JSON.stringify({ error: "R2 not configured" }), { status: 500, headers: { "Content-Type": "application/json" } });
       try {
+        // Reject oversized bodies before buffering them into memory.
+        const MAX_UPLOAD_BYTES = 2 * 1024 * 1024; // 2 MB
+        const declaredLength = Number(request.headers.get("Content-Length")) || 0;
+        if (declaredLength > MAX_UPLOAD_BYTES + 8192) return new Response(JSON.stringify({ error: "File too large" }), { status: 413, headers: { "Content-Type": "application/json" } });
+
         const formData = await request.formData();
         const imageFile = formData.get("image");
         if (!imageFile) return new Response(JSON.stringify({ error: "No image uploaded" }), { status: 400, headers: { "Content-Type": "application/json" } });
-        const validMimes = ["image/jpeg", "image/png", "image/webp", "image/gif"];
-        if (!validMimes.includes(imageFile.type)) return new Response(JSON.stringify({ error: "Invalid image type" }), { status: 400, headers: { "Content-Type": "application/json" } });
-        if (imageFile.size > 5 * 1024 * 1024) return new Response(JSON.stringify({ error: "File too large" }), { status: 400, headers: { "Content-Type": "application/json" } });
+        // The extension is derived from the MIME type, never from the client
+        // filename, so a file named "payload.html" can never be stored as .html.
+        // SVG is deliberately absent: it can execute script when served inline.
+        const extByMime = {
+          "image/jpeg": "jpg",
+          "image/png": "png",
+          "image/webp": "webp",
+          "image/gif": "gif",
+        };
+        const ext = extByMime[imageFile.type];
+        if (!ext) return new Response(JSON.stringify({ error: "Invalid image type" }), { status: 400, headers: { "Content-Type": "application/json" } });
+        if (imageFile.size > MAX_UPLOAD_BYTES) return new Response(JSON.stringify({ error: "File too large" }), { status: 413, headers: { "Content-Type": "application/json" } });
         const timestamp = Date.now();
         const random = Math.round(Math.random() * 1e9);
-        const ext = imageFile.name.split(".").pop() || "jpg";
         const filename = `${ownerId}/${timestamp}-${random}.${ext}`;
         const buffer = await imageFile.arrayBuffer();
         await bucket.put(filename, buffer, { httpMetadata: { contentType: imageFile.type } });
@@ -582,8 +649,8 @@ async function handlePaymentRoutes(request, env, path) {
       if (!body) return new Response(JSON.stringify({ error: "Invalid request" }), { status: 400, headers: { "Content-Type": "application/json" } });
       const { tenant_id, unit_id, apartment_id, month, amount_due, amount_paid, payment_date, note } = body;
       if (!tenant_id || !month) return new Response(JSON.stringify({ error: "tenant_id and month required" }), { status: 400, headers: { "Content-Type": "application/json" } });
-      const due = Number(amount_due) || 0;
-      const paid = Number(amount_paid) || 0;
+      const due = isFiniteNumber(amount_due) ? Number(amount_due) : 0;
+      const paid = isFiniteNumber(amount_paid) ? Number(amount_paid) : 0;
       const balance = due - paid;
       const status = computePaymentStatus(due, paid);
       const existing = await queryOne(db, "SELECT id FROM payments WHERE owner_id = ? AND tenant_id = ? AND month = ?", [ownerId, tenant_id, month]);
@@ -604,8 +671,10 @@ async function handlePaymentRoutes(request, env, path) {
       const { amount_due, amount_paid, payment_date, month, note } = body;
       const existing = await queryOne(db, "SELECT * FROM payments WHERE id = ? AND owner_id = ?", [id, ownerId]);
       if (!existing) return new Response(JSON.stringify({ error: "Not found" }), { status: 404, headers: { "Content-Type": "application/json" } });
-      const due = amount_due !== undefined ? Number(amount_due) : Number(existing.amount_due);
-      const paid = amount_paid !== undefined ? Number(amount_paid) : Number(existing.amount_paid);
+      if (amount_due !== undefined && !isFiniteNumber(amount_due)) return new Response(JSON.stringify({ error: "amount_due must be a number" }), { status: 400, headers: { "Content-Type": "application/json" } });
+      if (amount_paid !== undefined && !isFiniteNumber(amount_paid)) return new Response(JSON.stringify({ error: "amount_paid must be a number" }), { status: 400, headers: { "Content-Type": "application/json" } });
+      const due = amount_due !== undefined ? Number(amount_due) : Number(existing.amount_due) || 0;
+      const paid = amount_paid !== undefined ? Number(amount_paid) : Number(existing.amount_paid) || 0;
       const balance = due - paid;
       const paymentStatus = computePaymentStatus(due, paid);
       const updates = [], vals = [];
@@ -671,7 +740,7 @@ async function handleExpenseRoutes(request, env, path) {
     if (method === "POST") {
       if (!body) return new Response(JSON.stringify({ error: "Invalid request" }), { status: 400, headers: { "Content-Type": "application/json" } });
       const { apartment_id, unit_id, description, amount, date } = body;
-      if (!description || !amount) return new Response(JSON.stringify({ error: "description and amount required" }), { status: 400, headers: { "Content-Type": "application/json" } });
+      if (!description || !amount || !isFiniteNumber(amount)) return new Response(JSON.stringify({ error: "description and amount required" }), { status: 400, headers: { "Content-Type": "application/json" } });
       await execute(db, `INSERT INTO expenses (owner_id, apartment_id, unit_id, description, amount, date)
         VALUES (?, ?, ?, ?, ?, ?)`, [ownerId, apartment_id || null, unit_id || null, description, Number(amount), date || null]);
       const result = await queryOne(db, "SELECT * FROM expenses WHERE owner_id = ? ORDER BY id DESC LIMIT 1", [ownerId]);
@@ -681,6 +750,7 @@ async function handleExpenseRoutes(request, env, path) {
     if (method === "PUT") {
       if (!body || !id) return new Response(JSON.stringify({ error: "Invalid request" }), { status: 400, headers: { "Content-Type": "application/json" } });
       const { apartment_id, unit_id, description, amount, date } = body;
+      if (amount !== undefined && !isFiniteNumber(amount)) return new Response(JSON.stringify({ error: "amount must be a number" }), { status: 400, headers: { "Content-Type": "application/json" } });
       const existing = await queryOne(db, "SELECT id FROM expenses WHERE id = ? AND owner_id = ?", [id, ownerId]);
       if (!existing) return new Response(JSON.stringify({ error: "Not found" }), { status: 404, headers: { "Content-Type": "application/json" } });
       const updates = [], vals = [];

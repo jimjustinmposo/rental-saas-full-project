@@ -128,7 +128,7 @@ export default function ReportsPage() {
   const profitColor = result && Number(result.profit) < 0 ? "var(--color-danger)" : "var(--color-success)";
 
   return (
-    <div>
+    <div className="page-fade-in">
       <div className="page-header">
         <h1>Reports</h1>
       </div>

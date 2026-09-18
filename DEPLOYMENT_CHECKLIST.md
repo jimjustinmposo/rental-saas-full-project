@@ -1,4 +1,14 @@
 # Cloudflare Migration - Quick Start Checklist
+> ### ️ Breaking change: secrets are no longer committed
+>
+> `JWT_SECRET` and `ADMIN_SIGNUP_PASSWORD` used to sit in `wrangler.toml` as
+> plaintext. They have been removed. The API now **fails closed in production**:
+> without `JWT_SECRET` every API call returns 401, and without
+> `ADMIN_SIGNUP_PASSWORD` signup returns 503 (no hardcoded fallback is used).
+> Run the commands in **Phase 8** *before* the first production deploy.
+>
+> Verify with `https://<your-project>.pages.dev/api/health` — every flag in the
+> `configured` object must be `true`.
 
 ## Pre-Migration
 
@@ -154,16 +164,20 @@ wrangler pages deploy
 ## Phase 8: Production Secrets (5 min)
 
 ```bash
-# Set production environment variables
+# 1. Generate a strong signing key (use the output for JWT_SECRET)
+openssl rand -base64 32
+
+# 2. Set production secrets
 wrangler secret put --env production ADMIN_SIGNUP_PASSWORD
 wrangler secret put --env production JWT_SECRET
 wrangler secret put --env production FRONTEND_URL
 
-# Verify
-wrangler env list
+# 3. Verify (booleans only - no secret values are exposed)
+curl https://<your-project>.pages.dev/api/health
 ```
 
 - [ ] All production secrets set via `wrangler secret put`
+- [ ] `/api/health` reports `jwtSecret` and `adminSignupPassword` as `true`
 - [ ] Do NOT commit secrets to Git
 - [ ] `.dev.vars` is in `.gitignore`
 

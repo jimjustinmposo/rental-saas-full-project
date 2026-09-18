@@ -1,8 +1,10 @@
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo, useCallback } from "react";
 import apiClient from "../api/apiClient";
+import { cachedGet, invalidate } from "../api/cache";
 import { useAuth } from "../api/AuthContext";
 import { formatMoney } from "../utils/currency";
 import { formatMonthLabel, currentMonthValue } from "../utils/month";
+import { SkeletonWidget } from "./Skeleton";
 
 export default function PaymentChecklist() {
   const { owner } = useAuth();
@@ -14,35 +16,42 @@ export default function PaymentChecklist() {
   const [apartmentFilter, setApartmentFilter] = useState(""); // "" = All
   const [search, setSearch] = useState("");
 
-  const load = (m) => {
+  const load = useCallback((m) => {
     setLoading(true);
-    apiClient
-      .get("/reports/checklist", { params: { month: m } })
-      .then((res) => setData(res.data))
+    cachedGet("/reports/checklist", { params: { month: m }, ttl: 15_000 })
+      .then((d) => setData(d))
       .finally(() => setLoading(false));
-  };
+  }, []);
 
-  // Changing the month re-fetches from scratch — checkboxes reflect
-  // whatever's actually saved for that specific month, nothing is reset
-  // in the database, only the on-screen selection moves to a new month.
   useEffect(() => {
     load(month);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [month]);
+  }, [month, load]);
 
   const handleToggle = async (tenantId, checked) => {
+    // Optimistic update — flip the pill immediately, revert on error
+    setData((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        apartments: prev.apartments.map((apt) => ({
+          ...apt,
+          tenants: apt.tenants.map((t) =>
+            t.tenant_id === tenantId ? { ...t, paid: checked } : t
+          ),
+        })),
+      };
+    });
     setTogglingId(tenantId);
     try {
       await apiClient.post("/reports/checklist/toggle", { tenant_id: tenantId, month, checked });
-      load(month);
+      // Invalidate cache so next open gets fresh data; no full reload needed
+      invalidate("/reports/checklist");
+      invalidate("/reports/dashboard");
     } finally {
       setTogglingId(null);
     }
   };
 
-  // Combines the flat dropdown and the free-text search. The search matches
-  // tenant names OR apartment names (case-insensitive); any flat whose tenants
-  // no longer match is hidden entirely. Memoized so typing stays instant.
   const visibleApartments = useMemo(() => {
     if (!data) return [];
     let apartments = data.apartments;
@@ -101,7 +110,7 @@ export default function PaymentChecklist() {
       </div>
 
       {loading ? (
-        <div className="empty-state">Loading…</div>
+        <SkeletonWidget lines={5} />
       ) : !data || data.apartments.length === 0 ? (
         <div className="empty-state">No active tenants yet.</div>
       ) : visibleApartments.length === 0 ? (

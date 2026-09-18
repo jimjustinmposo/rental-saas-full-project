@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import apiClient from "../api/apiClient";
+import { cachedGet } from "../api/cache";
 import { useAuth } from "../api/AuthContext";
 import { formatMoney } from "../utils/currency";
 import { formatMonthLabel } from "../utils/month";
+import { SkeletonWidget } from "./Skeleton";
 
 export default function PendingPayments() {
   const navigate = useNavigate();
@@ -13,13 +14,14 @@ export default function PendingPayments() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    apiClient
-      .get("/reports/pending-all")
-      .then((res) => setPending(res.data.pending))
+    cachedGet("/reports/pending-all", { ttl: 20_000 })
+      .then((data) => setPending(data.pending || []))
       .finally(() => setLoading(false));
   }, []);
 
   const grandTotal = pending.reduce((sum, p) => sum + Number(p.total_pending || 0), 0);
+
+  if (loading) return <SkeletonWidget lines={3} />;
 
   return (
     <div className="card">
@@ -32,9 +34,7 @@ export default function PendingPayments() {
       <p style={{ fontSize: 12.5, color: "var(--color-text-muted)", marginBottom: 12 }}>
         Every unpaid or partially-paid balance on record, across all months — not just this month.
       </p>
-      {loading ? (
-        <div className="empty-state">Loading…</div>
-      ) : pending.length === 0 ? (
+      {pending.length === 0 ? (
         <div className="empty-state">No outstanding balances anywhere 🎉</div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column" }}>

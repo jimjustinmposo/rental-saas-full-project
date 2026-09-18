@@ -40,41 +40,49 @@ function ensureSchema(env) {
   return schemaInitPromise;
 }
 
-/**
- * Resolve the allowed CORS origin.
- * Reflects the request's Origin header when it matches the configured
- * FRONTEND_URL (comma-separated allowed list), otherwise falls back to the
- * first configured value, so the deployed pages.dev domain (and any custom
- * domain added later) works without CORS errors.
- */
-function getAllowedOrigin(request, env) {
-  const origin = request.headers.get("Origin");
-  const allowed = (env.FRONTEND_URL || "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-  if (origin && (allowed.length === 0 || allowed.includes(origin))) return origin;
-  if (allowed.length > 0) return allowed[0];
-  return origin || "*";
+const DEV_ORIGINS = [
+  "http://localhost:3000",
+  "http://localhost:5173",
+  "http://127.0.0.1:3000",
+  "http://127.0.0.1:5173",
+];
+
+function isProduction(env) {
+  return (env.NODE_ENV || "").toLowerCase() === "production";
 }
 
 /**
- * Add CORS headers to response
+ * Build the CORS allowlist. Production uses ONLY the configured FRONTEND_URL
+ * list (comma-separated). Development additionally allows the usual dev ports
+ * so the app keeps working out of the box locally.
  */
-function addCorsHeaders(request, response, env) {
-  const headers = new Headers(response.headers);
-  const allowedOrigin = getAllowedOrigin(request, env);
+function allowedOrigins(env) {
+  const configured = (env.FRONTEND_URL || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (isProduction(env)) return configured;
+  return configured.concat(DEV_ORIGINS);
+}
 
-  headers.set("Access-Control-Allow-Origin", allowedOrigin);
-  headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS");
-  headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
-  headers.set("Access-Control-Allow-Credentials", "true");
+/**
+ * Resolve the allowed CORS origin, or null when the request origin is not
+ * trusted. A null result emits no CORS headers, so the browser blocks the
+ * cross-origin read — unknown sites never get to read the response.
+ *
+ * Same-origin requests (the normal production case, where Pages serves both
+ * the SPA and /api) never need CORS headers at all.
+ */
+function getAllowedOrigin(request, env) {
+  const origin = request.headers.get("Origin");
+  if (!origin) return null;
 
-  return new Response(response.body, {
-    status: response.status,
-    statusText: response.statusText,
-    headers,
-  });
+  const allowed = allowedOrigins(env);
+  if (allowed.length === 0) {
+    // Nothing configured: fail closed in production, stay permissive in dev.
+    return isProduction(env) ? null : origin;
+  }
+  return allowed.includes(origin) ? origin : null;
 }
 
 /**
@@ -82,13 +90,171 @@ function addCorsHeaders(request, response, env) {
  */
 function handleOptions(request, env) {
   const allowedOrigin = getAllowedOrigin(request, env);
-  return new Response(null, {
-    status: 204,
-    headers: {
-      "Access-Control-Allow-Origin": allowedOrigin,
-      "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, PATCH, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type, Authorization",
-    },
+  const headers = {
+    "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, PATCH, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, If-None-Match",
+    "Access-Control-Max-Age": "86400",
+    Vary: "Origin",
+  };
+  if (allowedOrigin) {
+    headers["Access-Control-Allow-Origin"] = allowedOrigin;
+    headers["Access-Control-Allow-Credentials"] = "true";
+  }
+  return new Response(null, { status: 204, headers });
+}
+
+const RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
+const RATE_LIMIT_MAX = 20; // 20 auth POSTs per IP per window
+const rateBuckets = new Map();
+
+/**
+ * Fixed-window limiter kept in isolate memory. It is intentionally a cheap
+ * first line of defence against password brute-forcing and signup spam — an
+ * attacker spread across many colo isolates can still exceed it, so it
+ * complements (never replaces) the PBKDF2 hashing and password-length rules.
+ *
+ * Returns a 429 Response when the limit is exceeded, otherwise null.
+ */
+function checkRateLimit(request, resource, method) {
+  if (resource !== "auth" || method !== "POST") return null;
+
+  const ip =
+    request.headers.get("CF-Connecting-IP") ||
+    (request.headers.get("X-Forwarded-For") || "").split(",")[0].trim() ||
+    "unknown";
+
+  const key = `${ip}|auth`;
+  const now = Date.now();
+  const bucket = rateBuckets.get(key);
+
+  if (!bucket || now - bucket.start > RATE_LIMIT_WINDOW_MS) {
+    rateBuckets.set(key, { start: now, count: 1 });
+    // Opportunistic cleanup so the map cannot grow without bound.
+    if (rateBuckets.size > 5000) {
+      for (const [k, v] of rateBuckets) {
+        if (now - v.start > RATE_LIMIT_WINDOW_MS) rateBuckets.delete(k);
+      }
+    }
+    return null;
+  }
+
+  bucket.count += 1;
+  if (bucket.count > RATE_LIMIT_MAX) {
+    const retryAfter = Math.max(
+      1,
+      Math.ceil((bucket.start + RATE_LIMIT_WINDOW_MS - now) / 1000)
+    );
+    return new Response(
+      JSON.stringify({ error: "Too many attempts. Please wait a few minutes and try again." }),
+      {
+        status: 429,
+        headers: { "Content-Type": "application/json", "Retry-After": String(retryAfter) },
+      }
+    );
+  }
+  return null;
+}
+
+/**
+ * Resource prefixes whose GET responses are safe to store in the browser cache.
+ * Everything else (health, auth, and every mutation) is explicitly `no-store`.
+ *
+ * `private` matters: these payloads are per-owner, so a shared/CDN cache must
+ * never store them.
+ *
+ * We deliberately use `no-cache` (store, but ALWAYS revalidate) instead of
+ * `max-age=10`: a positive max-age would let the browser replay a stale list
+ * for up to 10 s after a write, making a just-created payment appear missing.
+ * With the ETag below, revalidation costs a ~200 byte 304 instead of the whole
+ * JSON body, so this is both correct and cheap. Instant paint is handled one
+ * layer up by the in-memory stale-while-revalidate cache in
+ * frontend/src/api/cache.js, which mutations bypass via invalidate().
+ */
+const CACHEABLE_GET_RESOURCES = new Set([
+  "apartments",
+  "units",
+  "tenants",
+  "payments",
+  "expenses",
+  "reports",
+]);
+
+const CACHEABLE_CACHE_CONTROL = "private, no-cache";
+
+function cacheControlFor(method, resource) {
+  if (method === "GET" && CACHEABLE_GET_RESOURCES.has(resource)) {
+    return CACHEABLE_CACHE_CONTROL;
+  }
+  return "no-store";
+}
+
+/**
+ * Weak ETag over the response body. 32 hex chars (128 bits) of SHA-256 is far
+ * more than enough to detect changes in a few KB of JSON, and a short ETag
+ * keeps the header small.
+ */
+async function computeEtag(text) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  let hex = "";
+  for (const byte of new Uint8Array(digest)) hex += byte.toString(16).padStart(2, "0");
+  return `W/"${hex.slice(0, 32)}"`;
+}
+
+/**
+ * Attach caching, security and CORS headers to a handler response, and
+ * short-circuit with 304 Not Modified when the client already holds this body.
+ */
+async function finalize(request, env, response, resource) {
+  const method = request.method;
+  const headers = new Headers(response.headers);
+
+  headers.set("Cache-Control", cacheControlFor(method, resource));
+
+  // Baseline security headers for the JSON API.
+  headers.set("X-Content-Type-Options", "nosniff");
+  headers.set("Referrer-Policy", "no-referrer");
+  headers.set("X-Frame-Options", "DENY");
+  headers.set("Permissions-Policy", "geolocation=(), microphone=(), camera=()");
+
+  // The CORS headers vary by Origin, so any cache must key on it too.
+  headers.set("Vary", "Origin");
+
+  const origin = getAllowedOrigin(request, env);
+  if (origin) {
+    headers.set("Access-Control-Allow-Origin", origin);
+    headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS");
+    headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization, If-None-Match");
+    headers.set("Access-Control-Expose-Headers", "ETag");
+    headers.set("Access-Control-Allow-Credentials", "true");
+  }
+
+  // Only successful, cacheable GETs get an ETag — no point hashing errors or
+  // mutation responses, and `no-store` responses must not be revalidated.
+  const etagEligible =
+    method === "GET" && response.status === 200 && CACHEABLE_GET_RESOURCES.has(resource);
+
+  if (!etagEligible) {
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    });
+  }
+
+  const bodyText = await response.text();
+  const etag = await computeEtag(bodyText);
+  headers.set("ETag", etag);
+
+  if (request.headers.get("If-None-Match") === etag) {
+    // 304 must not carry a body; the cached copy is still valid.
+    headers.delete("Content-Length");
+    return new Response(null, { status: 304, headers });
+  }
+
+  return new Response(bodyText, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
   });
 }
 
@@ -107,23 +273,38 @@ export async function onRequest(context) {
     return handleOptions(request, env);
   }
 
+  // Parse the path to determine which handler to use
+  const pathSegments = pathValue ? pathValue.split("/").filter(Boolean) : [];
+  const resource = pathSegments[0];
+  const restOfPath = pathSegments.slice(1).join("/");
+
   try {
+    // Cheap brute-force guard for /api/auth/* before any DB work happens.
+    const limited = checkRateLimit(request, resource, request.method);
+    if (limited) return await finalize(request, env, limited, resource);
+
     // Ensure the D1 schema exists. Guarded so it only runs ONCE per isolate
     // (not on every request) — see ensureSchema above.
     await ensureSchema(env);
-
-    // Parse the path to determine which handler to use
-    const pathSegments = pathValue ? pathValue.split("/").filter(Boolean) : [];
-    const resource = pathSegments[0];
-    const restOfPath = pathSegments.slice(1).join("/");
 
     let response;
 
     // Route to appropriate handler based on resource
     switch (resource) {
       case "health":
+        // Booleans only — never echo secret values. Lets an operator confirm
+        // that `wrangler secret put` actually landed before users hit 401s.
         response = new Response(
-          JSON.stringify({ status: "ok" }),
+          JSON.stringify({
+            status: "ok",
+            configured: {
+              jwtSecret: Boolean(env.JWT_SECRET),
+              adminSignupPassword: Boolean(env.ADMIN_SIGNUP_PASSWORD),
+              frontendUrl: Boolean(env.FRONTEND_URL),
+              database: Boolean(env.DB),
+              bucket: Boolean(env.BUCKET),
+            },
+          }),
           { status: 200, headers: { "Content-Type": "application/json" } }
         );
         break;
@@ -163,8 +344,8 @@ export async function onRequest(context) {
         );
     }
 
-    // Add CORS headers to all responses
-    return addCorsHeaders(request, response, env);
+    // Add caching, security and CORS headers to all responses
+    return await finalize(request, env, response, resource);
   } catch (err) {
     console.error("[api] Unhandled error:", err);
     
@@ -173,6 +354,6 @@ export async function onRequest(context) {
       { status: 500, headers: { "Content-Type": "application/json" } }
     );
     
-    return addCorsHeaders(request, response, env);
+    return await finalize(request, env, response, resource);
   }
 }

@@ -1,10 +1,12 @@
 import React, { useEffect, useState, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import apiClient from "../api/apiClient";
+import { cachedGet, invalidate } from "../api/cache";
 import { useSortableData } from "../hooks/useSortableData";
 import { useAuth } from "../api/AuthContext";
 import { formatMoney } from "../utils/currency";
 import SearchableSelect from "../components/SearchableSelect";
+import { SkeletonTable } from "../components/Skeleton";
 
 const emptyForm = { apartment_id: "", description: "", amount: "", date: "" };
 
@@ -44,10 +46,10 @@ export default function ExpensesPage() {
     setLoading(true);
     Promise.all([
       apiClient.get("/expenses", { params: range !== "all" ? { range } : undefined }),
-      apiClient.get("/apartments"),
+      cachedGet("/apartments", { ttl: 60_000 }),
     ]).then(([e, a]) => {
       setExpenses(e.data);
-      setApartments(a.data);
+      setApartments(a);
     }).finally(() => setLoading(false));
   };
 
@@ -69,6 +71,7 @@ export default function ExpensesPage() {
     } else {
       await apiClient.post("/expenses", form);
     }
+    invalidate(["/reports/dashboard"]);
     resetForm();
     load();
   };
@@ -88,6 +91,7 @@ export default function ExpensesPage() {
   const handleDelete = async (id) => {
     if (!window.confirm("Delete this expense?")) return;
     await apiClient.delete(`/expenses/${id}`);
+    invalidate(["/reports/dashboard"]);
     load();
   };
 
@@ -109,7 +113,7 @@ export default function ExpensesPage() {
   const { sortedItems, requestSort, sortIndicator } = useSortableData(filteredExpenses);
 
   return (
-    <div>
+    <div className="page-fade-in">
       <div className="page-header">
         <h1>Expenses</h1>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
@@ -206,7 +210,7 @@ export default function ExpensesPage() {
 
       <div className="card">
         {loading ? (
-          <div className="empty-state">Loading…</div>
+          <SkeletonTable rows={5} cols={5} />
         ) : sortedItems.length === 0 ? (
           <div className="empty-state">
             {search ? "No expenses match your search." : "No expenses logged yet."}

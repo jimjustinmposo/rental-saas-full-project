@@ -1,6 +1,7 @@
 import React from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "../api/AuthContext";
+import { prefetchRoute } from "../utils/prefetch";
 
 const NAV_ITEMS = [
   { to: "/dashboard", label: "Dashboard", icon: "🏠" },
@@ -30,6 +31,8 @@ export default function Sidebar() {
           <NavLink
             key={item.to}
             to={item.to}
+            onMouseEnter={() => prefetchRoute(item.to)}
+            onFocus={() => prefetchRoute(item.to)}
             style={({ isActive }) => ({
               display: "flex",
               alignItems: "center",

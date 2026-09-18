@@ -1,6 +1,8 @@
 import React, { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import apiClient from "../api/apiClient";
+import { cachedGet, invalidate } from "../api/cache";
+import { SkeletonTenantCards } from "../components/Skeleton";
 
 const emptyForm = { name: "", address: "", payment_note: "" };
 
@@ -14,7 +16,9 @@ export default function ApartmentsPage() {
   const [search, setSearch] = useState("");
 
   const load = () => {
-    apiClient.get("/apartments").then((res) => setApartments(res.data)).finally(() => setLoading(false));
+    cachedGet("/apartments", { ttl: 60_000 })
+      .then((data) => setApartments(data))
+      .finally(() => setLoading(false));
   };
 
   useEffect(load, []);
@@ -32,6 +36,7 @@ export default function ApartmentsPage() {
     } else {
       await apiClient.post("/apartments", form);
     }
+    invalidate("/apartments");
     resetForm();
     load();
   };
@@ -50,6 +55,7 @@ export default function ApartmentsPage() {
   const handleDelete = async (id) => {
     if (!window.confirm("Delete this apartment? This cannot be undone.")) return;
     await apiClient.delete(`/apartments/${id}`);
+    invalidate("/apartments");
     load();
   };
 
@@ -65,7 +71,7 @@ export default function ApartmentsPage() {
   }, [apartments, search]);
 
   return (
-    <div>
+    <div className="page-fade-in">
       <div className="page-header">
         <h1>Apartments</h1>
         <button
@@ -124,7 +130,7 @@ export default function ApartmentsPage() {
       </div>
 
       {loading ? (
-        <div className="empty-state">Loading…</div>
+        <SkeletonTenantCards count={4} />
       ) : filteredApartments.length === 0 ? (
         <div className="card empty-state">
           {search ? "No apartments match your search." : 'No apartments yet. Click "Add Apartment" to create your first property.'}

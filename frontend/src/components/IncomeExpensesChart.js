@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { SkeletonChart } from "./Skeleton";
 import {
   ResponsiveContainer,
   ComposedChart,
@@ -92,7 +93,7 @@ export default function IncomeExpensesChart({ apartments = [] }) {
 
       <div className="chart-container">
         {loading ? (
-          <div className="empty-state">Loading chart…</div>
+          <SkeletonChart />
         ) : chartData.length === 0 ? (
           <div className="empty-state">No payment or expense history yet.</div>
         ) : (

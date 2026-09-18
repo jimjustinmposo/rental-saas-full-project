@@ -243,3 +243,94 @@ table.data-table {
   padding: 48px 20px;
   color: var(--color-text-faint);
 }
+
+/* ============================================================
+   SKELETON SHIMMER
+   ============================================================ */
+@keyframes shimmer {
+  0%   { background-position: -400px 0; }
+  100% { background-position:  400px 0; }
+}
+
+.skeleton-bar {
+  display: block;
+  background: linear-gradient(
+    90deg,
+    var(--color-border) 25%,
+    #f0eefb 50%,
+    var(--color-border) 75%
+  );
+  background-size: 800px 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
+/* ============================================================
+   BUTTON FOCUS / ACTIVE (INP improvement)
+   ============================================================ */
+.btn:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+.btn:active {
+  transform: scale(0.97);
+}
+
+/* ============================================================
+   INPUT FOCUS RING
+   ============================================================ */
+.input-field:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
+}
+
+/* ============================================================
+   SIDEBAR / NAV LINK TRANSITION (GPU-composited only)
+   ============================================================ */
+.sidebar a, .mobile-nav a {
+  will-change: background-color;
+}
+
+/* ============================================================
+   CARD HOVER — use transform on GPU layer
+   ============================================================ */
+.clickable-card {
+  will-change: transform;
+}
+
+/* ============================================================
+   SCROLL PERFORMANCE — long lists
+   ============================================================ */
+.table-wrap {
+  contain: layout style;
+}
+
+/* ============================================================
+   PAGE FADE-IN (reduces jarring content pop)
+   ============================================================ */
+@keyframes pageFadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.page-fade-in {
+  animation: pageFadeIn 0.18s ease both;
+}
+
+/* ============================================================
+   TOAST / INLINE FEEDBACK
+   ============================================================ */
+.toast {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 200;
+  background: var(--color-text);
+  color: #fff;
+  padding: 11px 18px;
+  border-radius: var(--radius-sm);
+  font-size: 13.5px;
+  font-weight: 600;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+  animation: pageFadeIn 0.18s ease both;
+}
+.toast-success { background: var(--color-success); }
+.toast-danger  { background: var(--color-danger);  }

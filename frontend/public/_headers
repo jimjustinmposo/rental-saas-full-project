@@ -1,0 +1,52 @@
+# Cloudflare Pages header rules — this file lives in public/ so CRA copies it
+# into build/ on every `npm run build`, and Pages applies it to static assets.
+# (Pages Functions responses set their own security headers in
+#  functions/api/[[path]].js — _headers does not apply to Function output.)
+# Docs: https://developers.cloudflare.com/pages/configuration/headers/
+
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self'; script-src-attr 'unsafe-hashes' 'sha256-MhtPZXr7+LpJUY5qtMutB+qWfQtMaPccfe7QXtCcEYc='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https:; connect-src 'self' https:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'; upgrade-insecure-requests
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: geolocation=(), microphone=(), camera=(), payment=()
+  Strict-Transport-Security: max-age=31536000; includeSubDomains
+  Cross-Origin-Opener-Policy: same-origin
+
+# --- CSP notes -------------------------------------------------------------
+# script-src is 'self' only: no 'unsafe-inline', no 'unsafe-eval'. React events
+# are attached via addEventListener, and CRA's production HTML contains no
+# inline <script>, so nothing else is needed.
+#
+# script-src-attr allows exactly ONE inline handler: the `onload="this.media='all'"`
+# in public/index.html that flips the font stylesheet from media="print" to all.
+# The hash below is the SHA-256 of that attribute value (this.media='all').
+# If you edit that attribute, regenerate the hash with:
+#   node -e "console.log('sha256-'+require('crypto').createHash('sha256').update(\"this.media='all'\",'utf8').digest('base64'))"
+# Browsers without 'unsafe-hashes' support simply fall back to the system font.
+#
+# style-src needs 'unsafe-inline' because React writes inline style attributes
+# and index.html carries a tiny critical-CSS <style> block.
+#
+# If you enable Cloudflare Web Analytics (or Rocket Loader) on the zone, it
+# injects its own script — add https://static.cloudflareinsights.com to
+# script-src, otherwise the beacon is blocked (the app itself is unaffected).
+#
+# Verify after deploying: open DevTools -> Console and confirm there are no
+# "Refused to load/execute" CSP errors.
+
+# The HTML shell must be revalidated on every load so a new deploy is picked up
+# immediately. A stale shell would reference deleted bundle filenames.
+/index.html
+  Cache-Control: public, max-age=0, must-revalidate
+
+/
+  Cache-Control: public, max-age=0, must-revalidate
+
+# Content-hashed bundles never change once published — cache them for a year.
+/static/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# Uploaded media served from the same origin.
+/uploads/*
+  Cache-Control: public, max-age=31536000, immutable

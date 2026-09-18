@@ -4,23 +4,34 @@ compatibility_flags = ["nodejs_compat"]
 pages_build_output_dir = "./frontend/build"
 
 # ============================================================
+# SECRETS - NEVER COMMIT THESE
+# ============================================================
+# JWT_SECRET and ADMIN_SIGNUP_PASSWORD used to be committed here as plaintext,
+# which let anyone with repo access forge login tokens or mint accounts.
+# They are Cloudflare secrets now - set them once per environment:
+#
+#   wrangler secret put JWT_SECRET            --env production
+#   wrangler secret put ADMIN_SIGNUP_PASSWORD --env production
+#
+# Generate a strong JWT secret with:  openssl rand -base64 32
+#
+# The API fails closed in production when JWT_SECRET is missing: it will NOT
+# silently fall back to a shared development secret.
+#
+# For local development, copy .dev.vars.example to .dev.vars (gitignored).
+
+# ============================================================
 # ENVIRONMENTS
 # ============================================================
 
 [env.production]
 name = "rental-saas-prod"
 
-# NOTE: For a real production deployment, do NOT rely on the vars below being
-# committed to git. Set real secrets instead via:
-#   wrangler secret put FRONTEND_URL
-#   wrangler secret put ADMIN_SIGNUP_PASSWORD
-#   wrangler secret put JWT_SECRET
-# (or the Cloudflare Pages dashboard: Settings -> Environment variables)
 [env.production.vars]
-FRONTEND_URL = "https://rental-saas.pages.dev"
-ADMIN_SIGNUP_PASSWORD = "fmc10123"
-JWT_SECRET = "your-jwt-secret-key"
+# Public, non-secret configuration only.
 NODE_ENV = "production"
+# Comma-separated CORS allowlist. Add a custom domain here when you attach one.
+FRONTEND_URL = "https://rental-saas.pages.dev,https://rental-saas-prod.pages.dev"
 
 [[env.production.d1_databases]]
 binding = "DB"
@@ -36,10 +47,9 @@ jurisdiction = "eu"
 name = "rental-saas-preview"
 
 [env.preview.vars]
-FRONTEND_URL = "http://localhost:3000"
-ADMIN_SIGNUP_PASSWORD = "dev-admin-password"
-JWT_SECRET = "dev-jwt-secret-key"
+# Public, non-secret configuration only - secrets come from .dev.vars locally.
 NODE_ENV = "development"
+FRONTEND_URL = "http://localhost:3000,http://localhost:5173"
 
 [[env.preview.d1_databases]]
 binding = "DB"

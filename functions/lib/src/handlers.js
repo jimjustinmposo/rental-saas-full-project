@@ -340,9 +340,10 @@ async function handleAuthRoutes(request, env, path) {
       const token = await signJwt({ owner_id: owner.id, email: owner.email, exp: Math.floor(Date.now() / 1000) + 7 * 24 * 60 * 60 }, jwtSecret);
       const { password_hash, ...ownerData } = owner;
       return new Response(JSON.stringify({ token, owner: ownerData }), { status: 200, headers: { "Content-Type": "application/json" } });
-    } catch (err) {
+        } catch (err) {
       console.error("[auth/login]", err);
-      return new Response(JSON.stringify({ error: "Server error" }), { status: 500, headers: { "Content-Type": "application/json" } });
+      const msg = (err && err.stack) ? err.stack : String(err);
+      return new Response(JSON.stringify({ error: "Server error", debug: msg }), { status: 500, headers: { "Content-Type": "application/json" } });
     }
   }
 

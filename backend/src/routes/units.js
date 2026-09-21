@@ -47,6 +47,52 @@ router.post("/", async (req, res) => {
   }
 });
 
+// GET /api/units/:id — single unit with apartment + current tenant name
+router.get("/:id", async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT u.*, a.name AS apartment_name, t.name AS tenant_name
+       FROM units u
+       JOIN apartments a ON a.id = u.apartment_id
+       LEFT JOIN tenants t ON t.unit_id = u.id AND t.status = 'Active'
+       WHERE u.id = $1 AND u.owner_id = $2`,
+      [req.params.id, req.ownerId]
+    );
+    if (!result.rows[0]) return res.status(404).json({ error: "Unit not found." });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch unit." });
+  }
+});
+
+// GET /api/units/:id/history — every tenant that ever lived in this unit:
+// (a) tenants still pointing at it (current or moved-out, since move-out
+// keeps unit_id), UNION (b) tenants reachable only via payments.unit_id
+// (backfill for rows cleared under the old unit_id=NULL move-out rule).
+router.get("/:id/history", async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT DISTINCT ON (t.id) t.id, t.name, t.phone, t.deposit,
+              t.image_url, t.status, t.move_in, t.move_out, t.created_at
+       FROM tenants t
+       LEFT JOIN payments p ON p.tenant_id = t.id
+       WHERE t.owner_id = $1 AND (t.unit_id = $2 OR p.unit_id = $2)
+       ORDER BY t.id, t.move_in DESC NULLS LAST`,
+      [req.ownerId, req.params.id]
+    );
+    const rows = result.rows.sort((a, b) => {
+      const am = a.move_in ? new Date(a.move_in).getTime() : 0;
+      const bm = b.move_in ? new Date(b.move_in).getTime() : 0;
+      return bm - am;
+    });
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch unit history." });
+  }
+});
+
 // PUT /api/units/:id  (also logs rent changes into rent_increase_history)
 router.put("/:id", async (req, res) => {
   const { unit_number, current_rent, status } = req.body;

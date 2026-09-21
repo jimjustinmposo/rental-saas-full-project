@@ -360,12 +360,30 @@ async function handleUnitRoutes(request, env, path) {
   if (!ownerId) return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { "Content-Type": "application/json" } });
 
   try {
-    const id = getPathId(path);
+    const segs = path.split("/").filter(Boolean);
+    const id = segs.length > 0 ? segs[0] : null;
+    const isHistory = segs.length === 2 && segs[1] === "history";
     const url = new URL(request.url);
     const apartmentId = url.searchParams.get("apartment_id");
 
     if (method === "GET") {
-      if (id) {
+      // /units/:id/history — every tenant that ever lived in this unit
+      if (isHistory && id) {
+        const result = await query(db,
+          `SELECT DISTINCT t.id, t.name, t.phone, t.deposit,
+                  t.image_url, t.status, t.move_in, t.move_out, t.created_at
+           FROM tenants t
+           LEFT JOIN payments p ON p.tenant_id = t.id
+           WHERE t.owner_id = ? AND (t.unit_id = ? OR p.unit_id = ?)`,
+          [ownerId, id, id]);
+        const sorted = (result.rows || []).sort((a, b) => {
+          const am = a.move_in ? new Date(a.move_in).getTime() : 0;
+          const bm = b.move_in ? new Date(b.move_in).getTime() : 0;
+          return bm - am;
+        });
+        return new Response(JSON.stringify(sorted), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      if (id && !isHistory) {
         const result = await queryOne(db, `SELECT u.*, a.name AS apartment_name, t.name AS tenant_name
           FROM units u JOIN apartments a ON a.id = u.apartment_id
           LEFT JOIN tenants t ON t.unit_id = u.id AND t.status = 'Active'

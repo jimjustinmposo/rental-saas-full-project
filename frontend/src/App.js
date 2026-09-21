@@ -1,4 +1,4 @@
-import React, { lazy, Suspense } from "react";
+import React, { lazy, Suspense, useEffect } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "./api/AuthContext";
 
@@ -45,6 +45,15 @@ function LoadingFallback() {
 }
 
 function AppRoutes() {
+  // CSP-safe font activation: public/index.html loads the font stylesheet
+  // with media="print" (non-blocking). Flip it to "all" once React mounts —
+  // equivalent to onload="this.media='all'" but without an inline handler,
+  // so the strict script-src-attr CSP does not block it.
+  useEffect(() => {
+    const link = document.getElementById("font-jakarta");
+    if (link) link.media = "all";
+  }, []);
+
   return (
     <Suspense fallback={<LoadingFallback />}>
       <Routes>

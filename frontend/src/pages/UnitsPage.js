@@ -7,7 +7,7 @@ import { useAuth } from "../api/AuthContext";
 import { formatMoney } from "../utils/currency";
 import SearchableSelect from "../components/SearchableSelect";
 import { SkeletonTable } from "../components/Skeleton";
-
+import UnitsHistoryModal from "../components/UnitsHistoryModal";
 export default function UnitsPage() {
   const { owner } = useAuth();
   const currency = owner?.currency || "USD";
@@ -18,8 +18,23 @@ export default function UnitsPage() {
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState({ apartment_id: "", unit_number: "", current_rent: "", status: "Vacant" });
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState(searchParams.get("apartment") || "");
-
+    const [search, setSearch] = useState(searchParams.get("apartment") || "");
+  const [selectedUnit, setSelectedUnit] = useState(null);
+  const [history, setHistory] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const loadUnitHistory = (unitId) => {
+    setHistoryLoading(true);
+    Promise.all([
+      apiClient.get(`/units/${unitId}`),
+      apiClient.get(`/units/${unitId}/history`),
+    ])
+      .then(([d, h]) => {
+        setSelectedUnit(d.data);
+        setHistory(h.data);
+        setHistoryLoading(false);
+      })
+      .catch(() => setHistoryLoading(false));
+  };
   const load = () => {
     Promise.all([
       cachedGet("/units", { ttl: 30_000 }),
@@ -29,15 +44,12 @@ export default function UnitsPage() {
       setApartments(a);
     }).finally(() => setLoading(false));
   };
-
   useEffect(load, []);
-
   const resetForm = () => {
     setForm({ apartment_id: "", unit_number: "", current_rent: "", status: "Vacant" });
     setEditingId(null);
     setShowForm(false);
   };
-
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (editingId) {
@@ -53,7 +65,6 @@ export default function UnitsPage() {
     resetForm();
     load();
   };
-
   const handleEditClick = (unit) => {
     setEditingId(unit.id);
     setForm({
@@ -65,14 +76,12 @@ export default function UnitsPage() {
     setShowForm(true);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
-
   const handleDelete = async (id) => {
     if (!window.confirm("Delete this unit?")) return;
     await apiClient.delete(`/units/${id}`);
     invalidate(["/units", "/apartments"]);
     load();
   };
-
   const filteredUnits = useMemo(() => {
     if (!search.trim()) return units;
     const q = search.toLowerCase();
@@ -83,9 +92,7 @@ export default function UnitsPage() {
         u.tenant_name?.toLowerCase().includes(q)
     );
   }, [units, search]);
-
   const { sortedItems, requestSort, sortIndicator } = useSortableData(filteredUnits);
-
   return (
     <div className="page-fade-in">
       <div className="page-header">
@@ -97,7 +104,6 @@ export default function UnitsPage() {
           {showForm ? "Cancel" : "+ Add Unit"}
         </button>
       </div>
-
       {showForm && (
         <form onSubmit={handleSubmit} className="card" style={{ marginBottom: 20 }}>
           {editingId && (
@@ -153,7 +159,6 @@ export default function UnitsPage() {
           </button>
         </form>
       )}
-
       <div className="search-bar">
         <span>🔍</span>
         <input
@@ -162,7 +167,6 @@ export default function UnitsPage() {
           onChange={(e) => setSearch(e.target.value)}
         />
       </div>
-
       <div className="card">
         {loading ? (
           <SkeletonTable rows={5} cols={5} />
@@ -191,8 +195,13 @@ export default function UnitsPage() {
                 </tr>
               </thead>
               <tbody>
-                {sortedItems.map((u) => (
-                  <tr key={u.id}>
+                                {sortedItems.map((u) => (
+                  <tr
+                    key={u.id}
+                    className="clickable-row"
+                    onClick={() => { if (!showForm) loadUnitHistory(u.id); }}
+                    style={{ cursor: "pointer" }}
+                  >
                     <td data-label="Apartment">{u.apartment_name}</td>
                     <td data-label="Unit #">{u.unit_number}</td>
                     <td data-label="Rent">{formatMoney(u.current_rent, currency)}</td>
@@ -205,14 +214,14 @@ export default function UnitsPage() {
                       <button
                         className="btn btn-secondary"
                         style={{ padding: "6px 10px" }}
-                        onClick={() => handleEditClick(u)}
+                        onClick={(e) => { e.stopPropagation(); handleEditClick(u); }}
                       >
                         Edit
                       </button>
                       <button
                         className="btn btn-danger"
                         style={{ padding: "6px 10px" }}
-                        onClick={() => handleDelete(u.id)}
+                        onClick={(e) => { e.stopPropagation(); handleDelete(u.id); }}
                       >
                         Delete
                       </button>
@@ -224,6 +233,14 @@ export default function UnitsPage() {
           </div>
         )}
       </div>
+      <UnitsHistoryModal
+        open={!!selectedUnit}
+        unit={selectedUnit}
+        history={history}
+        loading={historyLoading}
+        currency={currency}
+        onClose={() => setSelectedUnit(null)}
+      />
     </div>
   );
 }

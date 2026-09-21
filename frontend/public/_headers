@@ -5,7 +5,7 @@
 # Docs: https://developers.cloudflare.com/pages/configuration/headers/
 
 /*
-  Content-Security-Policy: default-src 'self'; script-src 'self'; script-src-attr 'unsafe-hashes' 'sha256-MhtPZXr7+LpJUY5qtMutB+qWfQtMaPccfe7QXtCcEYc='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https:; connect-src 'self' https:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'; upgrade-insecure-requests
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https:; connect-src 'self' https:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'; upgrade-insecure-requests
   X-Content-Type-Options: nosniff
   X-Frame-Options: DENY
   Referrer-Policy: strict-origin-when-cross-origin
@@ -14,19 +14,16 @@
   Cross-Origin-Opener-Policy: same-origin
 
 # --- CSP notes -------------------------------------------------------------
-# script-src is 'self' only: no 'unsafe-inline', no 'unsafe-eval'. React events
-# are attached via addEventListener, and CRA's production HTML contains no
-# inline <script>, so nothing else is needed.
-#
-# script-src-attr allows exactly ONE inline handler: the `onload="this.media='all'"`
-# in public/index.html that flips the font stylesheet from media="print" to all.
-# The hash below is the SHA-256 of that attribute value (this.media='all').
-# If you edit that attribute, regenerate the hash with:
-#   node -e "console.log('sha256-'+require('crypto').createHash('sha256').update(\"this.media='all'\",'utf8').digest('base64'))"
-# Browsers without 'unsafe-hashes' support simply fall back to the system font.
-#
-# style-src needs 'unsafe-inline' because React writes inline style attributes
-# and index.html carries a tiny critical-CSS <style> block.
+# script-src is 'self' only: no 'unsafe-inline', no 'unsafe-eval', and no
+# script-src-attr at all. React attaches all events via addEventListener,
+# CRA's production HTML contains no inline <script>, and the font stylesheet
+# in public/index.html has NO onload attribute (App.js flips media="print"
+# to "all" on mount). With zero inline handlers anywhere, there is nothing
+# for script-src-attr to allow — so the directive is intentionally absent.
+# (An earlier revision used script-src-attr 'unsafe-hashes' + a hash for the
+# font onload trick; some browsers surfaced a spurious script-src-attr
+# violation warning from that. Removing both the attribute and the directive
+# is strictly cleaner and CSP-safe everywhere.)
 #
 # If you enable Cloudflare Web Analytics (or Rocket Loader) on the zone, it
 # injects its own script — add https://static.cloudflareinsights.com to

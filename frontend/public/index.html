@@ -9,12 +9,14 @@
     <!-- Preconnect to font origins so the TLS handshake happens in parallel -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <!-- Non-blocking font load: media=print trick defers parsing until after FCP -->
+    <!-- Non-blocking font load (CSP-safe: no inline handler).
+      The stylesheet starts disabled; React in App.js flips it to
+      media="all" after mount, so no onload attribute is needed. -->
     <link
+      id="font-jakarta"
       rel="stylesheet"
       href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
       media="print"
-      onload="this.media='all'"
     />
     <noscript>
       <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" />

@@ -1,4 +1,5 @@
 import React, { useEffect } from "react";
+import { createPortal } from "react-dom";
 import { formatMoney } from "../utils/currency";
 
 function fmtDate(v) {
@@ -49,7 +50,14 @@ export default function UnitsHistoryModal({ open, unit, history, loading, curren
       if (e.key === "Escape") onClose();
     };
     document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
+    // Lock background scroll while modal is open so the page behind
+    // (long units list) can't shift the overlay off-screen.
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prevOverflow;
+    };
   }, [open, onClose]);
 
   if (!open || !unit) return null;
@@ -58,24 +66,36 @@ export default function UnitsHistoryModal({ open, unit, history, loading, curren
   const current = rows.filter((t) => !t.move_out);
   const past = rows.filter((t) => t.move_out);
 
-  return (
+  // Render via portal to document.body: UnitsPage sits inside .page-fade-in
+  // (which has a transform animation) and .table-wrap/.content-section
+  // (CSS `contain: layout`). Both make `position: fixed` position relative
+  // to the page content instead of the viewport — so on long lists the
+  // overlay rendered mid-page and required scrolling. Portaling + flex-start
+  // alignment keeps the dialog pinned to the visible viewport with its own
+  // internal scroll.
+  return createPortal(
     <div
       onClick={onClose}
+      role="presentation"
       style={{
         position: "fixed",
         inset: 0,
         background: "rgba(15,10,40,0.55)",
         zIndex: 150,
         display: "flex",
-        alignItems: "center",
+        alignItems: "flex-start",
         justifyContent: "center",
-        padding: 16,
+        padding: "8vh 16px 16px",
+        overflowY: "auto",
       }}
     >
       <div
         className="card"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Unit ${unit.unit_number} history`}
         onClick={(e) => e.stopPropagation()}
-        style={{ maxWidth: 560, width: "100%", maxHeight: "85vh", overflowY: "auto", margin: 0 }}
+        style={{ maxWidth: 560, width: "100%", maxHeight: "84vh", overflowY: "auto", margin: 0 }}
       >
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
           <div>
@@ -152,7 +172,8 @@ export default function UnitsHistoryModal({ open, unit, history, loading, curren
           </>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
